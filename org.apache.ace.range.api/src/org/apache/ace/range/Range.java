@@ -24,8 +24,12 @@ import aQute.bnd.annotation.ProviderType;
  * Class that captures a simple, modifiable range.
  */
 @ProviderType
+<<<<<<< HEAD
 public class Range
 {
+=======
+public class Range {
+>>>>>>> refs/remotes/apache/trunk
     private long m_low;
     private long m_high;
 
@@ -136,7 +140,8 @@ public class Range
     /**
      * Converts the range to a string representation that can be parsed
      * back to a new <code>Range</code> object.
-     * @return
+     * 
+     * @return string representation
      */
     public String toRepresentation() {
         if (m_low == m_high) {
@@ -145,5 +150,10 @@ public class Range
         else {
             return Long.toString(m_low) + '-' + Long.toString(m_high);
         }
+    }
+    
+    @Override
+    public String toString() {
+        return "Range[" + toRepresentation() + "]";
     }
 }

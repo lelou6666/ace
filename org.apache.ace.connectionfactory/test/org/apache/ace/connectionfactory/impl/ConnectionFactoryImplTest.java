@@ -19,12 +19,11 @@
 
 package org.apache.ace.connectionfactory.impl;
 
-import static org.apache.ace.test.utils.TestUtils.UNIT;
-
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLConnection;
-import java.util.Properties;
+import java.util.Dictionary;
+import java.util.Hashtable;
 
 import org.testng.annotations.Test;
 
@@ -47,7 +46,7 @@ public class ConnectionFactoryImplTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.ConnectionFactoryImpl#createConnection(java.net.URL)}.
      */
-    @Test(groups = { UNIT }, expectedExceptions = IllegalArgumentException.class)
+    @Test(expectedExceptions = IllegalArgumentException.class)
     public void testCreateConnectionNullUrlFail() throws Exception {
         new ConnectionFactoryImpl().createConnection(null);
     }
@@ -55,7 +54,7 @@ public class ConnectionFactoryImplTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.ConnectionFactoryImpl#createConnection(java.net.URL, org.osgi.service.useradmin.User)}.
      */
-    @Test(groups = { UNIT }, expectedExceptions = IllegalArgumentException.class)
+    @Test(expectedExceptions = IllegalArgumentException.class)
     public void testCreateConnectionNullUserFail() throws Exception {
         new ConnectionFactoryImpl().createConnection(new URL("file:///tmp/foo"), null);
     }
@@ -63,7 +62,7 @@ public class ConnectionFactoryImplTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.ConnectionFactoryImpl#createConnection(java.net.URL, org.osgi.service.useradmin.User)}.
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void testCreateConnectionOk() throws Exception {
         URLConnection conn = new ConnectionFactoryImpl().createConnection(new URL("file:///tmp/foo"));
         assert conn != null : "Expected valid connection to be created!";
@@ -72,11 +71,11 @@ public class ConnectionFactoryImplTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.ConnectionFactoryImpl#deleted(java.lang.String)}.
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void testDeleted() throws Exception {
         ConnectionFactoryImpl connFactory = new ConnectionFactoryImpl();
 
-        Properties props = createBasicAuthConfig(TEST_URL.toExternalForm());
+        Dictionary<String, ?> props = createBasicAuthConfig(TEST_URL.toExternalForm());
 
         connFactory.updated("pid1", props);
         
@@ -92,11 +91,11 @@ public class ConnectionFactoryImplTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.ConnectionFactoryImpl#getBasicAuthCredentials(UrlCredentials)}.
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void testGetBasicAuthCredentialsOk() throws Exception {
         ConnectionFactoryImpl connFactory = new ConnectionFactoryImpl();
 
-        Properties props = createBasicAuthConfig(TEST_URL.toExternalForm());
+        Dictionary<String, ?> props = createBasicAuthConfig(TEST_URL.toExternalForm());
 
         connFactory.updated("pid1", props);
 
@@ -112,14 +111,14 @@ public class ConnectionFactoryImplTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.ConnectionFactoryImpl#updated(java.lang.String, java.util.Dictionary)}.
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void testUpdatedInsertsCredentialsOk() throws Exception {
         ConnectionFactoryImpl connFactory = new ConnectionFactoryImpl();
         
         UrlCredentials credentials = connFactory.getCredentials(TEST_URL);
         assert credentials == null : "Expected no credentials to be found!";
         
-        Properties props = createBasicAuthConfig(TEST_URL.toExternalForm());
+        Dictionary<String, ?> props = createBasicAuthConfig(TEST_URL.toExternalForm());
 
         connFactory.updated("pid1", props);
         
@@ -130,11 +129,11 @@ public class ConnectionFactoryImplTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.ConnectionFactoryImpl#updated(java.lang.String, java.util.Dictionary)}.
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void testUpdatedUpdatesCredentialsOk() throws Exception {
         ConnectionFactoryImpl connFactory = new ConnectionFactoryImpl();
 
-        Properties props = createBasicAuthConfig(TEST_URL.toExternalForm());
+        Dictionary<String, Object> props = createBasicAuthConfig(TEST_URL.toExternalForm());
 
         connFactory.updated("pid1", props);
         
@@ -158,8 +157,8 @@ public class ConnectionFactoryImplTest {
     /**
      * @return a dictionary containing a configuration for basic authentication, never <code>null</code>.
      */
-    private Properties createBasicAuthConfig(String url) {
-        Properties props = new Properties();
+    private Dictionary<String, Object> createBasicAuthConfig(String url) {
+        Dictionary<String, Object> props = new Hashtable<>();
         props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, url);
         props.put(UrlCredentialsFactory.KEY_AUTH_TYPE, "basic");
         props.put(UrlCredentialsFactory.KEY_AUTH_USER_NAME, "foo");

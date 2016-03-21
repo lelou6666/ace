@@ -26,6 +26,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.lang.ref.Reference;
+import java.lang.ref.SoftReference;
 import java.lang.ref.WeakReference;
 import java.net.URL;
 import java.security.MessageDigest;
@@ -74,13 +75,12 @@ public class VelocityArtifactPreprocessor extends ArtifactPreprocessorBase {
             throw new RuntimeException("Failed to create VelocityArtifactPreprocessor instance!", e);
         }
 
-        m_cachedArtifacts = new ConcurrentHashMap<String, Reference<byte[]>>();
-        m_cachedHashes = new ConcurrentHashMap<String, Reference<String>>();
+        m_cachedArtifacts = new ConcurrentHashMap<>();
+        m_cachedHashes = new ConcurrentHashMap<>();
     }
 
     @Override
     public boolean needsNewVersion(String url, PropertyResolver props, String targetID, String fromVersion) {
-
         byte[] input = null;
         byte[] result = null;
         try {
@@ -104,7 +104,7 @@ public class VelocityArtifactPreprocessor extends ArtifactPreprocessorBase {
 
         // find the hash for the previous version
         String oldHash = getHashForVersion(url, targetID, fromVersion);
-
+        
         // Note: we do not cache any previously created processed templates, since the call that asks us to approve a new version
         // may cross a pending needsNewVersion call.
         boolean answer = !newHash.equals(oldHash);
@@ -129,10 +129,12 @@ public class VelocityArtifactPreprocessor extends ArtifactPreprocessorBase {
         String name = getFilename(url, targetID, version);
 
         String location = null;
-        if(obrBase.getProtocol().equals("http")){
+        String protocol = obrBase.getProtocol();
+        if ("http".equals(protocol) || "https".equals(protocol)) {
             // upload the new resource to the OBR
             location = upload(new ByteArrayInputStream(result), name, ConfigurationHelper.MIMETYPE, obrBase);
-        } else {
+        }
+        else {
             // this is only to support the unit tests
             location = obrBase + name;
         }
@@ -193,15 +195,16 @@ public class VelocityArtifactPreprocessor extends ArtifactPreprocessorBase {
         while (dashIndex != -1 && fileVersion.equals("")) {
             String versionCandidate = fileName.substring(dashIndex + 1);
             Matcher versionMatcher = VERSION_PATTERN.matcher(versionCandidate);
-            if(versionMatcher.matches()){
+            if (versionMatcher.matches()) {
                 fileName = fileName.substring(0, dashIndex);
                 fileVersion = versionCandidate;
-            } else {
+            }
+            else {
                 dashIndex = fileName.indexOf(fileName, dashIndex);                
             }
         }
 
-        fileName = fileName + ".target-" + targetID + "-" + targetVersion + fileExtension;
+        fileName = fileName + "_" + targetID + "_" + targetVersion + fileExtension;
         return fileName;
     }
 
@@ -214,10 +217,31 @@ public class VelocityArtifactPreprocessor extends ArtifactPreprocessorBase {
      * @return a hash
      */
     private String getHashForVersion(String url, String target, String version) {
+        String hash = null;
         String key = createHashKey(url, target, version);
         Reference<String> ref = m_cachedHashes.get(key);
-        String hash = (ref != null) ? ref.get() : null;
+        if (ref != null) {
+            hash = ref.get();
+        }
+        if (hash == null) {
+            try {
+                hash = hash(getBytesFromUrl(getFullUrl(url, target, version)));
+                m_cachedHashes.put(key, new SoftReference<>(hash));
+            }
+            catch (IOException e) {
+                return null;
+            }
+        }
+        else {
+            hash = ref.get();
+        }
         return hash;
+    }
+
+    private String getFullUrl(String url, String targetID, String version) {
+        String filename = getFilename(url, targetID, version);
+        String result = url.substring(0, url.lastIndexOf('/') + 1) + filename;
+        return result;
     }
 
     /**
@@ -230,7 +254,7 @@ public class VelocityArtifactPreprocessor extends ArtifactPreprocessorBase {
      */
     private void setHashForVersion(String url, String target, String version, String hash) {
         String key = createHashKey(url, target, version);
-        m_cachedHashes.put(key, new WeakReference<String>(hash));
+        m_cachedHashes.put(key, new WeakReference<>(hash));
     }
 
     /**
@@ -291,7 +315,7 @@ public class VelocityArtifactPreprocessor extends ArtifactPreprocessorBase {
                 baos.write(buf, 0, count);
             }
             result = baos.toByteArray();
-            m_cachedArtifacts.put(url, new WeakReference<byte[]>(result));
+            m_cachedArtifacts.put(url, new SoftReference<>(result));
         }
         finally {
             silentlyClose(in);

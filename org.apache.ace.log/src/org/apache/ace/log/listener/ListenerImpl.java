@@ -20,9 +20,10 @@ package org.apache.ace.log.listener;
 
 import java.util.ArrayList;
 import java.util.Dictionary;
+import java.util.Hashtable;
 import java.util.List;
 import java.util.Properties;
-import org.apache.ace.log.AuditEvent;
+import org.apache.ace.feedback.AuditEvent;
 import org.apache.ace.log.Log;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
@@ -54,7 +55,7 @@ public class ListenerImpl implements BundleListener, FrameworkListener, EventHan
     volatile BundleContext m_context;
     volatile Log m_auditLog;
 
-    private final List m_queue = new ArrayList();
+    private final List<Runnable> m_queue = new ArrayList<>();
 
     public ListenerImpl(BundleContext context, Log log) {
         m_context = context;
@@ -201,7 +202,7 @@ public class ListenerImpl implements BundleListener, FrameworkListener, EventHan
             m_queue.add(new Runnable() {
                 public void run() {
                     int eventType = AuditEvent.DEPLOYMENTADMIN_BASE;
-                    Dictionary props = new Properties();
+                    Dictionary<String, Object> props = new Hashtable<>();
 
                     String topic = event.getTopic();
 
@@ -228,9 +229,9 @@ public class ListenerImpl implements BundleListener, FrameworkListener, EventHan
                         String deplPackName = (String) event.getProperty("deploymentpackage.name");
 
                         // to retrieve the version, DeploymentAdmin has to be used
-                        ServiceReference ref = m_context.getServiceReference(DeploymentAdmin.class.getName());
+                        ServiceReference<DeploymentAdmin> ref = m_context.getServiceReference(DeploymentAdmin.class);
                         if (ref != null) {
-                            DeploymentAdmin deplAdmin = (DeploymentAdmin) m_context.getService(ref);
+                            DeploymentAdmin deplAdmin = m_context.getService(ref);
                             if (deplAdmin != null) {
                                 DeploymentPackage dp = deplAdmin.getDeploymentPackage(deplPackName);
                                 if (dp != null) {

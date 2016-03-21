@@ -22,32 +22,29 @@ import java.lang.reflect.Type;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.Dictionary;
-import java.util.Enumeration;
+import java.util.Map;
 
-import org.apache.ace.log.AuditEvent;
-import org.apache.ace.log.LogEvent;
+import org.apache.ace.feedback.AuditEvent;
+import org.apache.ace.feedback.Event;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonSerializationContext;
 import com.google.gson.JsonSerializer;
 
-public class LogEventSerializer implements JsonSerializer<LogEvent> {
+public class LogEventSerializer implements JsonSerializer<Event> {
 
-	public JsonElement serialize(LogEvent e, Type typeOfSrc, JsonSerializationContext context) {
+	public JsonElement serialize(Event e, Type typeOfSrc, JsonSerializationContext context) {
         DateFormat format = SimpleDateFormat.getDateTimeInstance();
         JsonObject event = new JsonObject();
-        event.addProperty("logId", e.getLogID());
+        event.addProperty("logId", e.getStoreID());
         event.addProperty("id", e.getID());
         event.addProperty("time", format.format(new Date(e.getTime())));
         event.addProperty("type", toAuditEventType(e.getType()));
         JsonObject eventProperties = new JsonObject();
-        Dictionary p = e.getProperties();
-        Enumeration keyEnumeration = p.keys();
-        while (keyEnumeration.hasMoreElements()) {
-            Object key = keyEnumeration.nextElement();
-            eventProperties.addProperty(key.toString(), p.get(key).toString());
+        Map<String, String> p = e.getProperties();
+        for (String key : p.keySet()) {
+            eventProperties.addProperty(key, p.get(key));
         }
         event.add("properties", eventProperties);
         return event;

@@ -1,63 +1,56 @@
+<<<<<<< HEAD
 Test-Cases: ${classes;CONCRETE;EXTENDS;org.apache.ace.it.IntegrationTestBase}
 -buildpath: ${^-buildpath}, \
 	osgi.core,\
+=======
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
+-buildpath: \
+	${^-buildpath},\
+	osgi.core;version=6.0.0,\
+>>>>>>> refs/remotes/apache/trunk
 	osgi.cmpn,\
 	junit.osgi,\
-	biz.aQute.bnd,\
-	javax.servlet,\
-	com.sun.jersey.client,\
-	com.sun.jersey.core,\
-	gson,\
+	com.google.gson,\
+	org.apache.felix.http.api,\
+	org.apache.felix.http.servlet-api,\
 	org.apache.felix.dependencymanager,\
 	org.apache.ace.test;version=latest,\
-	org.apache.ace.log.api;version=latest,\
-	org.apache.ace.http.listener;version=latest,\
 	org.apache.ace.discovery.api;version=latest,\
 	org.apache.ace.discovery.property;version=latest,\
 	org.apache.ace.identification.api;version=latest,\
 	org.apache.ace.identification.property;version=latest,\
 	org.apache.ace.log.server.store.api;version=latest,\
-	org.apache.ace.scheduler.api;version=latest,\
 	org.apache.ace.deployment.servlet;version=latest,\
-	org.apache.ace.deployment.provider.filebased;version=latest,\
 	org.apache.ace.obr.storage;version=latest,\
 	org.apache.ace.repository.api;version=latest,\
-	org.apache.ace.repository.impl;version=latest,\
 	org.apache.ace.client.repository.api;version=latest,\
 	org.apache.ace.client.repository.helper.base;version=latest,\
 	org.apache.ace.client.repository.helper.bundle;version=latest,\
-	org.apache.ace.client.repository.helper.configuration;version=latest
--runfw: org.apache.felix.framework;version='[4,5)'
--runvm: -ea
--runbundles: osgi.cmpn,\
+	org.apache.ace.client.repository.helper.configuration;version=latest,\
+	org.apache.ace.feedback.common;version=latest
+
+-runfw: org.apache.felix.framework;version='[5,6)'
+-runbundles: \
+	osgi.cmpn,\
 	org.apache.felix.dependencymanager,\
 	org.apache.felix.configadmin,\
 	org.apache.felix.eventadmin,\
+	org.apache.felix.http.servlet-api,\
 	org.apache.felix.http.jetty,\
-	org.apache.felix.dependencymanager.shell,\
 	org.apache.felix.deploymentadmin,\
 	org.apache.felix.prefs,\
 	org.apache.felix.useradmin,\
 	org.apache.felix.useradmin.filestore,\
 	org.apache.felix.log,\
-	org.apache.felix.gogo.command,\
-	org.apache.felix.gogo.runtime,\
-	org.apache.felix.gogo.shell,\
-	com.sun.jersey.client,\
-	com.sun.jersey.core,\
 	org.apache.ace.test;version=latest,\
-	org.apache.ace.http.listener;version=latest,\
 	org.apache.ace.authentication.api;version=latest,\
 	org.apache.ace.connectionfactory;version=latest,\
-	org.apache.ace.scheduler.impl;version=latest,\
-	org.apache.ace.scheduler.api;version=latest,\
 	org.apache.ace.deployment.provider.api;version=latest,\
 	org.apache.ace.discovery.api;version=latest,\
 	org.apache.ace.discovery.property;version=latest,\
 	org.apache.ace.identification.api;version=latest,\
 	org.apache.ace.identification.property;version=latest,\
-	org.apache.ace.deployment.api;version=latest,\
-	org.apache.ace.deployment.deploymentadmin;version=latest,\
 	org.apache.ace.deployment.servlet;version=latest,\
 	org.apache.ace.deployment.streamgenerator;version=latest,\
 	org.apache.ace.deployment.provider.base;version=latest,\
@@ -67,8 +60,7 @@ Test-Cases: ${classes;CONCRETE;EXTENDS;org.apache.ace.it.IntegrationTestBase}
 	org.apache.ace.log.server.store.file;version=latest,\
 	org.apache.ace.repository.api;version=latest,\
 	org.apache.ace.repository.impl;version=latest,\
-	org.apache.ace.repository.servlet;version=latest,\
-	org.apache.ace.configurator.serveruseradmin;version=latest,\
+	org.apache.ace.repository.servlets;version=latest,\
 	org.apache.ace.obr.metadata;version=latest,\
 	org.apache.ace.obr.servlet;version=latest,\
 	org.apache.ace.obr.storage;version=latest,\
@@ -78,20 +70,23 @@ Test-Cases: ${classes;CONCRETE;EXTENDS;org.apache.ace.it.IntegrationTestBase}
 	org.apache.ace.client.repository.helper.configuration;version=latest,\
 	org.apache.ace.client.repository.impl;version=latest,\
 	org.apache.ace.deployment.provider.repositorybased;version=latest,\
-	org.apache.ace.client.rest;version=latest
--runproperties: org.apache.felix.log.storeDebug=true,\
-	org.apache.felix.eventadmin.Timeout=0,\
-	org.apache.felix.log.maxSize=1000
-Private-Package: org.apache.ace.client.rest.itest,\
-	com.google.gson,\
-	com.google.gson.*,\
-	aQute.*,\
-	org.osgi.service.bindex
-Import-Package: \
-	!aQute.bnd.*,\
-	!org.apache.tools.ant.*,\
-	!org.eclipse.*,\
-	*
+	org.apache.ace.client.rest;version=latest,\
+	org.apache.ace.client.workspace;version=latest,\
+	org.apache.ace.feedback.common;version=latest,\
+	org.apache.ace.http.context;version=latest
+-runvm: -ea
+-runee: JavaSE-1.7
+-runsystempackages: sun.reflect
+-runproperties: ${itestrunprops}
+-baseline:
+
+Test-Cases: ${classes;CONCRETE;EXTENDS;org.apache.ace.it.IntegrationTestBase}
+
+Private-Package: \
+	org.apache.ace.client.rest.itest,\
+	org.apache.ace.client.rest.util,\
+	com.google.gson*
+
 Bundle-Version: 1.0.0
 Bundle-Name: Apache ACE Client REST itest
 Bundle-Description: Integration test bundle for Apache ACE Client REST

@@ -36,6 +36,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.Callable;
 
+import org.apache.ace.client.repository.RepositoryAdminLoginContext;
 import org.apache.ace.client.repository.helper.ArtifactHelper;
 import org.apache.ace.client.repository.helper.ArtifactPreprocessor;
 import org.apache.ace.client.repository.helper.PropertyResolver;
@@ -48,8 +49,10 @@ import org.apache.ace.client.repository.object.DistributionObject;
 import org.apache.ace.client.repository.object.FeatureObject;
 import org.apache.ace.client.repository.object.TargetObject;
 import org.apache.ace.client.repository.stateful.StatefulTargetObject;
-import org.apache.ace.test.constants.TestConstants;
+import org.apache.ace.client.repository.stateful.StatefulTargetObject.StoreState;
 import org.apache.felix.dm.Component;
+import org.osgi.framework.InvalidSyntaxException;
+import org.osgi.service.useradmin.User;
 
 /**
  * Test cases for the template processing functionality.
@@ -121,6 +124,8 @@ public class TemplateProcessorTest extends BaseRepositoryAdminTest {
 	}
 
     public void testStatefulApprovalWithArtifacts() throws Exception {
+        setupRepository();
+        
         // some setup: we need a helper.
         ArtifactHelper myHelper = new MockArtifactHelper("mymime");
 
@@ -134,18 +139,18 @@ public class TemplateProcessorTest extends BaseRepositoryAdminTest {
         m_dependencyManager.add(myHelperService);
 
         // Empty tag map to be reused througout test
-        final Map<String, String> tags = new HashMap<String, String>();
+        final Map<String, String> tags = new HashMap<>();
 
         // First, create a bundle and two artifacts, but do not provide a processor for the artifacts.
         ArtifactObject b1 = createBasicBundleObject("bundle1");
-        Map<String, String> attr = new HashMap<String, String>();
+        Map<String, String> attr = new HashMap<>();
         attr.put(ArtifactObject.KEY_URL, "http://myobject");
         attr.put(ArtifactObject.KEY_PROCESSOR_PID, "my.processor.pid");
         attr.put(ArtifactHelper.KEY_MIMETYPE, "mymime");
 
         ArtifactObject a1 = m_artifactRepository.create(attr, tags);
 
-        attr = new HashMap<String, String>();
+        attr = new HashMap<>();
         attr.put(ArtifactObject.KEY_URL, "http://myotherobject");
         attr.put(ArtifactObject.KEY_PROCESSOR_PID, "my.processor.pid");
         attr.put(ArtifactObject.KEY_RESOURCE_ID, "mymime");
@@ -156,7 +161,7 @@ public class TemplateProcessorTest extends BaseRepositoryAdminTest {
         FeatureObject g = createBasicFeatureObject("feature");
         DistributionObject l = createBasicDistributionObject("distribution");
 
-        attr = new HashMap<String, String>();
+        attr = new HashMap<>();
         attr.put(TargetObject.KEY_ID, "myTarget");
 
         StatefulTargetObject sgo = m_statefulTargetRepository.preregister(attr, tags);
@@ -164,29 +169,38 @@ public class TemplateProcessorTest extends BaseRepositoryAdminTest {
         m_artifact2featureRepository.create(b1, g);
         m_artifact2featureRepository.create(a1, g);
         m_artifact2featureRepository.create(a2, g);
-
         m_feature2distributionRepository.create(g, l);
-
         m_distribution2targetRepository.create(l, sgo.getTargetObject());
 
-        try {
-            sgo.approve();
-            assertTrue("Without a resource processor for our artifact, approve should go wrong.", false);
-        }
-        catch (IllegalStateException ise) {
-            // expected
-        }
-
+        sgo.approve();
+        
+        runAndWaitForEvent(new Callable<Void>() {
+            public Void call() throws Exception {
+                m_repositoryAdmin.commit();
+                return null;
+            }
+        }, false, TOPIC_STATUS_CHANGED);
+        
+        assertEquals("Store state for target should still be new, because the resource processor is missing.", StoreState.New, sgo.getStoreState());
+        
         // Now, add a processor for the artifact.
-        attr = new HashMap<String, String>();
+        attr = new HashMap<>();
         attr.put(ArtifactObject.KEY_URL, "http://myprocessor");
         attr.put(BundleHelper.KEY_RESOURCE_PROCESSOR_PID, "my.processor.pid");
         attr.put(BundleHelper.KEY_SYMBOLICNAME, "my.processor.bundle");
+        attr.put(BundleHelper.KEY_VERSION, "1.0.0");
         attr.put(ArtifactHelper.KEY_MIMETYPE, BundleHelper.MIMETYPE);
 
         ArtifactObject b2 = m_artifactRepository.create(attr, tags);
 
         sgo.approve();
+        
+        runAndWaitForEvent(new Callable<Void>() {
+            public Void call() throws Exception {
+                m_repositoryAdmin.commit();
+                return null;
+            }
+        }, false, DeploymentVersionObject.TOPIC_ADDED, TOPIC_STATUS_CHANGED);        
 
         DeploymentVersionObject dep = m_deploymentVersionRepository.getMostRecentDeploymentVersion(sgo.getID());
 
@@ -208,10 +222,102 @@ public class TemplateProcessorTest extends BaseRepositoryAdminTest {
         assertEquals(a2.getURL(), artifact2.getUrl());
         assertEquals("my.processor.pid", artifact2.getDirective(DeploymentArtifact.DIRECTIVE_KEY_PROCESSORID));
         assertEquals(a2.getResourceId(), artifact2.getDirective(DeploymentArtifact.DIRECTIVE_KEY_RESOURCE_ID));
+        
+        // Now, add a new version of the processor (ACE-373)
+        assertFalse("There should be no changes.", sgo.needsApprove());
+
+        attr = new HashMap<>();
+        attr.put(ArtifactObject.KEY_URL, "http://myprocessor/v2");
+        attr.put(BundleHelper.KEY_RESOURCE_PROCESSOR_PID, "my.processor.pid");
+        attr.put(BundleHelper.KEY_SYMBOLICNAME, "my.processor.bundle");
+        attr.put(BundleHelper.KEY_VERSION, "2.0.0");
+        attr.put(ArtifactHelper.KEY_MIMETYPE, BundleHelper.MIMETYPE);
+
+        ArtifactObject b3 = m_artifactRepository.create(attr, tags);
+
+        assertTrue("By adding a resource processor, we should have triggered a change that needs to be approved.", sgo.needsApprove());
+
+        sgo.approve();
+
+        runAndWaitForEvent(new Callable<Void>() {
+            public Void call() throws Exception {
+                m_repositoryAdmin.commit();
+                return null;
+            }
+        }, false, DeploymentVersionObject.TOPIC_ADDED, TOPIC_STATUS_CHANGED);
+
+        dep = m_deploymentVersionRepository.getMostRecentDeploymentVersion(sgo.getID());
+
+        toDeploy = dep.getDeploymentArtifacts();
+
+        assertEquals("We expect to find four artifacts to deploy;", 4, toDeploy.length);
+        boolean foundBundle = false;
+        boolean foundProcessor = false;
+        boolean foundArtifact1 = false;
+        boolean foundArtifact2 = false;
+        for (DeploymentArtifact a : toDeploy) {
+            String url = a.getUrl();
+            if (url.equals(b1.getURL())) {
+                foundBundle = true;
+            }
+            else if (url.equals(b3.getURL())) {
+                assertEquals("true", a.getDirective(DeploymentArtifact.DIRECTIVE_ISCUSTOMIZER));
+                foundProcessor = true;
+            }
+            else if (url.equals(a1.getURL())) {
+                assertEquals("my.processor.pid", a.getDirective(DeploymentArtifact.DIRECTIVE_KEY_PROCESSORID));
+                foundArtifact1 = true;
+            }
+            else if (url.equals(a2.getURL())) {
+                assertEquals("my.processor.pid", a.getDirective(DeploymentArtifact.DIRECTIVE_KEY_PROCESSORID));
+                assertEquals(a2.getResourceId(), a.getDirective(DeploymentArtifact.DIRECTIVE_KEY_RESOURCE_ID));
+                foundArtifact2 = true;
+            }
+        }
+        assertTrue("Could not find bundle in deployment", foundBundle);
+        assertTrue("Could not find processor in deployment", foundProcessor);
+        assertTrue("Could not find artifact 1 in deployment", foundArtifact1);
+        assertTrue("Could not find artifact 2 in deployment", foundArtifact2);
+
+        // Now, let's add a new resource processor that is *older* than the one we already have.
+        // Nothing should change.
+
+        assertFalse("There should be no changes.", sgo.needsApprove());
+
+        attr = new HashMap<>();
+        attr.put(ArtifactObject.KEY_URL, "http://myprocessor/v1.5");
+        attr.put(BundleHelper.KEY_RESOURCE_PROCESSOR_PID, "my.processor.pid");
+        attr.put(BundleHelper.KEY_SYMBOLICNAME, "my.processor.bundle");
+        attr.put(BundleHelper.KEY_VERSION, "1.5.0");
+        attr.put(ArtifactHelper.KEY_MIMETYPE, BundleHelper.MIMETYPE);
+
+        m_artifactRepository.create(attr, tags);
+
+        assertFalse("By adding an older resource processor, we should not have triggered a change.", sgo.needsApprove());
 
         cleanUp();
 
         m_dependencyManager.remove(myHelperService);
+    }
+
+    private void setupRepository() throws IOException, InterruptedException, InvalidSyntaxException {
+        User user = new MockUser();
+
+        addRepository("storeInstance", "apache", "store", true);
+        addRepository("targetInstance", "apache", "target", true);
+        addRepository("deploymentInstance", "apache", "deployment", true);
+
+        RepositoryAdminLoginContext loginContext = m_repositoryAdmin.createLoginContext(user);
+        loginContext
+            .add(loginContext.createShopRepositoryContext()
+                .setLocation(m_endpoint).setCustomer("apache").setName("store").setWriteable())
+            .add(loginContext.createTargetRepositoryContext()
+                .setLocation(m_endpoint).setCustomer("apache").setName("target").setWriteable())
+            .add(loginContext.createDeploymentRepositoryContext()
+                .setLocation(m_endpoint).setCustomer("apache").setName("deployment").setWriteable());
+
+        m_repositoryAdmin.login(loginContext);
+        m_repositoryAdmin.checkout();
     }
 
     /**
@@ -219,8 +325,9 @@ public class TemplateProcessorTest extends BaseRepositoryAdminTest {
      * versions with it. It uses the configuration (autoconf) helper, which uses a VelocityBased preprocessor.
      */
     public void testTemplateProcessing() throws Exception {
+        setupRepository();
+        
         addObr("/obr", "store");
-        m_artifactRepository.setObrBase(new URL("http://localhost:" + TestConstants.PORT + "/obr/"));
 
         // create some template things
         String xmlHeader =
@@ -260,13 +367,15 @@ public class TemplateProcessorTest extends BaseRepositoryAdminTest {
         // create a deploymentversion
         assertTrue("With the new assignments, the SGO should need approval.", sgo.needsApprove());
         
-        runAndWaitForEvent(new Callable<Object>() {
-            public Object call() throws Exception {
-                sgo.approve();
+        sgo.approve();
+
+        runAndWaitForEvent(new Callable<Void>() {
+            public Void call() throws Exception {
+                m_repositoryAdmin.commit();
                 return null;
             }
-        }, false, TOPIC_STATUS_CHANGED);
-
+        }, false, DeploymentVersionObject.TOPIC_ADDED, TOPIC_STATUS_CHANGED);  
+        
         // find the deployment version
         DeploymentVersionObject dvo = m_deploymentVersionRepository.getMostRecentDeploymentVersion("templatetarget2");
         String inFile = tryGetStringFromURL(findXmlUrlInDeploymentObject(dvo), 10, 100);
@@ -279,6 +388,14 @@ public class TemplateProcessorTest extends BaseRepositoryAdminTest {
         a2g = m_artifact2featureRepository.create(a1, go);
 
         sgo.approve();
+        
+        runAndWaitForEvent(new Callable<Void>() {
+            public Void call() throws Exception {
+                m_repositoryAdmin.commit();
+                return null;
+            }
+        }, false, DeploymentVersionObject.TOPIC_ADDED, TOPIC_STATUS_CHANGED);  
+
 
         // find the deployment version
         dvo = m_deploymentVersionRepository.getMostRecentDeploymentVersion("templatetarget2");
@@ -288,14 +405,14 @@ public class TemplateProcessorTest extends BaseRepositoryAdminTest {
         inFile = tryGetStringFromURL(findXmlUrlInDeploymentObject(dvo), 10, 100);
 
         assertEquals(xmlHeader + simpleTemplateProcessed + xmlFooter, inFile);
-
-        deleteObr("/obr");
     }
 
     /**
      * Tests the template processing mechanism: given a custom processor, do the correct calls go out?
      */
     public void testTemplateProcessingInfrastructure() throws Exception {
+        setupRepository();
+        
         // create a preprocessor
         MockArtifactPreprocessor preprocessor = new MockArtifactPreprocessor();
 
@@ -332,7 +449,7 @@ public class TemplateProcessorTest extends BaseRepositoryAdminTest {
                 m_distribution2targetRepository.create(lo, gwo);
                 return null;
             }
-        }, false, TOPIC_ADDED);
+        }, false, TOPIC_STATUS_CHANGED);
 
         StatefulTargetObject sgo = findStatefulTarget(targetId);
         assertNotNull("Failed to find our target in the repository?!", sgo);
@@ -346,6 +463,14 @@ public class TemplateProcessorTest extends BaseRepositoryAdminTest {
         assertTrue("With the new assignments, the SGO should need approval.", sgo.needsApprove());
         // create a deploymentversion
         sgo.approve();
+        
+        
+        runAndWaitForEvent(new Callable<Void>() {
+            public Void call() throws Exception {
+                m_repositoryAdmin.commit();
+                return null;
+            }
+        }, false, DeploymentVersionObject.TOPIC_ADDED, TOPIC_STATUS_CHANGED);  
 
         // the preprocessor now has gotten its properties; inspect these
         PropertyResolver target = preprocessor.getProps();

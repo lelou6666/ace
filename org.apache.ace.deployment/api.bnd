@@ -1,4 +1,0 @@
-Export-Package: org.apache.ace.deployment
-Bundle-Version: 1.0.0
-Bundle-Name: Apache ACE Deployment API
-Bundle-Description: Provides the Apache ACE deployment API

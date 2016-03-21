@@ -28,77 +28,132 @@ import org.apache.ace.client.repository.object.ArtifactObject;
 import org.apache.ace.client.repository.object.FeatureObject;
 import org.apache.ace.client.repository.repository.ArtifactRepository;
 import org.apache.ace.webui.UIExtensionFactory;
-import org.apache.ace.webui.vaadin.AssociationRemover;
-import org.apache.ace.webui.vaadin.Associations;
+import org.apache.ace.webui.vaadin.AssociationManager;
+import org.osgi.framework.Constants;
 
 import com.vaadin.data.Item;
 
 /**
  * Provides an object panel for displaying artifacts.
  */
-public abstract class ArtifactsPanel extends BaseObjectPanel<ArtifactObject, ArtifactRepository> {
+public abstract class ArtifactsPanel extends BaseObjectPanel<ArtifactObject, ArtifactRepository, RepositoryObject, FeatureObject> {
+    private final double m_cacheRate;
+    private final int m_pageLength;
 
     /**
      * Creates a new {@link ArtifactsPanel} instance.
      * 
-     * @param associations the assocation-holder object;
-     * @param associationRemover the helper for removing associations.
+     * @param associations
+     *            the assocation-holder object;
+     * @param associationMgr
+     *            the helper for creating/removing associations.
      */
-    public ArtifactsPanel(Associations associations, AssociationRemover associationRemover) {
-        super(associations, associationRemover, "Artifact", UIExtensionFactory.EXTENSION_POINT_VALUE_ARTIFACT, true);
+    public ArtifactsPanel(AssociationHelper associations, AssociationManager associationMgr, double cacheRate, int pageLength) {
+        super(associations, associationMgr, "Artifact", UIExtensionFactory.EXTENSION_POINT_VALUE_ARTIFACT, true, ArtifactObject.class);
+
+        m_cacheRate = cacheRate;
+        m_pageLength = pageLength;
+
+        setCacheRate(m_cacheRate);
+        setPageLength(m_pageLength);
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
-    protected boolean doRemoveRightSideAssociation(ArtifactObject object, RepositoryObject other) {
-        List<Artifact2FeatureAssociation> associations = object.getAssociationsWith((FeatureObject) other);
+    public void populate() {
+        super.populate();
+        // For some reason, we need to explicitly set these two properties as Vaadin seems to loose their values
+        // somewhere...
+        setCacheRate(m_cacheRate);
+        setPageLength(m_pageLength);
+    }
+
+    @Override
+    protected void defineTableColumns() {
+        super.defineTableColumns();
+
+        setColumnCollapsed(OBJECT_DESCRIPTION, true);
+    }
+
+    @Override
+    protected Artifact2FeatureAssociation doCreateRightSideAssociation(String artifactId, String featureId) {
+        return m_associationManager.createArtifact2FeatureAssociation(artifactId, featureId);
+    }
+
+    @Override
+    protected boolean doRemoveRightSideAssociation(ArtifactObject object, FeatureObject other) {
+        List<Artifact2FeatureAssociation> associations = object.getAssociationsWith(other);
         for (Artifact2FeatureAssociation association : associations) {
-            m_associationRemover.removeAssociation(association);
+            m_associationManager.removeAssociation(association);
         }
         return true;
     }
 
-    /**
-     * {@inheritDoc}
-     */
+    @Override
+    protected String getDisplayName(ArtifactObject artifact) {
+        String bsn = artifact.getAttribute(Constants.BUNDLE_SYMBOLICNAME);
+        if (bsn != null) {
+            return getVersion(artifact);
+        }
+        return artifact.getName();
+    }
+
+    @Override
+    protected String getParentDisplayName(ArtifactObject artifact) {
+        String bsn = artifact.getAttribute(Constants.BUNDLE_SYMBOLICNAME);
+        if (bsn != null) {
+            return bsn;
+        }
+        return artifact.getName();
+    }
+
+    @Override
+    protected String getParentId(ArtifactObject artifact) {
+        String bsn = artifact.getAttribute(Constants.BUNDLE_SYMBOLICNAME);
+        if (bsn != null) {
+            return bsn;
+        }
+        return null;
+    }
+
     protected void handleEvent(String topic, RepositoryObject entity, org.osgi.service.event.Event event) {
         ArtifactObject artifact = (ArtifactObject) entity;
         if (ArtifactObject.TOPIC_ADDED.equals(topic)) {
-            add(artifact);
+            addToTable(artifact);
         }
         if (ArtifactObject.TOPIC_REMOVED.equals(topic)) {
-            remove(artifact);
+            removeFromTable(artifact);
         }
         if (ArtifactObject.TOPIC_CHANGED.equals(topic) || RepositoryAdmin.TOPIC_STATUSCHANGED.equals(topic)) {
             update(artifact);
         }
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     protected boolean isSupportedEntity(RepositoryObject entity) {
         return (entity instanceof ArtifactObject) && !isResourceProcessor((ArtifactObject) entity);
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     protected void populateItem(ArtifactObject artifact, Item item) {
-        item.getItemProperty(WORKING_STATE_ICON).setValue(getWorkingStateIcon(artifact));
-        item.getItemProperty(OBJECT_NAME).setValue(artifact.getName());
+        item.getItemProperty(OBJECT_NAME).setValue(getDisplayName(artifact));
         item.getItemProperty(OBJECT_DESCRIPTION).setValue(artifact.getDescription());
-        item.getItemProperty(ACTIONS).setValue(createActionButtons(artifact));
+        item.getItemProperty(ACTION_UNLINK).setValue(createRemoveLinkButton(artifact));
+        item.getItemProperty(ACTION_DELETE).setValue(createRemoveItemButton(artifact));
+    }
+
+    private String getVersion(ArtifactObject artifact) {
+        String bv = artifact.getAttribute(Constants.BUNDLE_VERSION);
+        if (bv != null) {
+            return bv;
+        }
+        return "";
     }
 
     /**
      * Returns whether or not the given artifact is actually a resource processor.
      * 
-     * @param artifact the artifact to test, cannot be <code>null</code>.
+     * @param artifact
+     *            the artifact to test, cannot be <code>null</code>.
      * @return <code>true</code> if the given artifact is a resource processor, <code>false</code> otherwise.
      */
     private boolean isResourceProcessor(ArtifactObject artifact) {

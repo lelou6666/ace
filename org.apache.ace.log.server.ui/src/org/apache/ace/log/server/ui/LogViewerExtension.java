@@ -24,8 +24,6 @@ import java.lang.reflect.Modifier;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.Dictionary;
-import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,11 +31,10 @@ import java.util.Map;
 import org.apache.ace.client.repository.RepositoryObject;
 import org.apache.ace.client.repository.object.TargetObject;
 import org.apache.ace.client.repository.stateful.StatefulTargetObject;
-import org.apache.ace.log.AuditEvent;
-import org.apache.ace.log.LogDescriptor;
-import org.apache.ace.log.LogEvent;
+import org.apache.ace.feedback.AuditEvent;
+import org.apache.ace.feedback.Descriptor;
+import org.apache.ace.feedback.Event;
 import org.apache.ace.log.server.store.LogStore;
-import org.apache.ace.webui.NamedObject;
 import org.apache.ace.webui.UIExtensionFactory;
 import org.osgi.service.log.LogService;
 
@@ -76,19 +73,17 @@ public class LogViewerExtension implements UIExtensionFactory {
     /**
      * contains a mapping of event type to a string representation of that type.
      */
-    private final Map<Integer, String> m_eventTypeMapping = new HashMap<Integer, String>();
+    private final Map<Integer, String> m_eventTypeMapping = new HashMap<>();
 
     /**
      * {@inheritDoc}
      */
     public Component create(Map<String, Object> context) {
-        RepositoryObject object = getRepositoryObjectFromContext(context);
-        if (object instanceof StatefulTargetObject
-            && !((StatefulTargetObject) object).isRegistered()) {
+        StatefulTargetObject target = getRepositoryObjectFromContext(context);
+        if (!target.isRegistered()) {
             VerticalLayout result = new VerticalLayout();
             result.setCaption(CAPTION);
-            result.addComponent(new Label(
-                "This target is not yet registered, so it has no log."));
+            result.addComponent(new Label("This target is not yet registered, so it has no log."));
             return result;
         }
 
@@ -114,7 +109,7 @@ public class LogViewerExtension implements UIExtensionFactory {
         m_table.setColumnCollapsingAllowed(true);
 
         try {
-            fillTable(object, m_table);
+            fillTable(target, m_table);
             // Sort on time in descending order...
             m_table.setSortAscending(false);
             m_table.setSortContainerPropertyId(COL_TIME);
@@ -148,7 +143,7 @@ public class LogViewerExtension implements UIExtensionFactory {
      *            the event to get the type for, cannot be <code>null</code>.
      * @return a string representation of the event's type, never <code>null</code>.
      */
-    final String getEventType(LogEvent event) {
+    final String getEventType(Event event) {
         if (m_eventTypeMapping.isEmpty()) {
             // Lazily create a mapping of value -> name of all event-types...
             for (Field f : AuditEvent.class.getFields()) {
@@ -181,8 +176,8 @@ public class LogViewerExtension implements UIExtensionFactory {
      *            the event to create a textarea for, cannot be <code>null</code>.
      * @return a {@link TextArea} instance, never <code>null</code>.
      */
-    final TextArea getProperties(LogEvent event) {
-        Dictionary props = event.getProperties();
+    final TextArea getProperties(Event event) {
+        Map<String, String> props = event.getProperties();
 
         TextArea area = new TextArea("", dumpProperties(props));
         area.setWidth(FILL_AREA);
@@ -193,24 +188,22 @@ public class LogViewerExtension implements UIExtensionFactory {
         return area;
     }
 
-    final Date getTime(LogEvent event) {
+    final Date getTime(Event event) {
         return new Date(event.getTime());
     }
 
     /**
      * Dumps the given dictionary to a string by placing all key,value-pairs on a separate line.
      * 
-     * @param dict
+     * @param props
      *            the dictionary to dump, may be <code>null</code>.
      * @return a string dump of all properties in the given dictionary, never <code>null</code>.
      */
-    private String dumpProperties(Dictionary dict) {
+    private String dumpProperties(Map<String, String> props) {
         StringBuilder sb = new StringBuilder();
-        if (dict != null) {
-            Enumeration keys = dict.keys();
-            while (keys.hasMoreElements()) {
-                String key = keys.nextElement().toString();
-                String value = dict.get(key).toString();
+        if (props != null) {
+            for (String key : props.keySet()) {
+                String value = props.get(key);
 
                 if (sb.length() > 0) {
                     sb.append("\n");
@@ -233,28 +226,22 @@ public class LogViewerExtension implements UIExtensionFactory {
      */
     private void fillTable(RepositoryObject object, Table table) throws IOException {
         String id = object.getAttribute(TargetObject.KEY_ID);
-        List<LogDescriptor> desc = m_store.getDescriptors(id);
+        List<Descriptor> desc = m_store.getDescriptors(id);
         if (desc != null) {
-            for (LogDescriptor log : desc) {
-                for (LogEvent event : m_store.get(log)) {
+            for (Descriptor log : desc) {
+                for (Event event : m_store.get(log)) {
                     table.addItem(new Object[] { getTime(event), getEventType(event), getProperties(event) }, null);
                 }
             }
         }
     }
 
-    private RepositoryObject getRepositoryObjectFromContext(
-        Map<String, Object> context) {
-        Object contextObject = context.get("object");
+    private StatefulTargetObject getRepositoryObjectFromContext(Map<String, Object> context) {
+        Object contextObject = context.get("statefulTarget");
         if (contextObject == null) {
             throw new IllegalStateException("No context object found");
         }
-        // It looks like there is some bug (or some other reason that escapes
-        // me) why ace is using either the object directly or wraps it in a
-        // NamedObject first.
-        // Its unclear when it does which so for now we cater for both.
-        return (contextObject instanceof NamedObject ? ((NamedObject) contextObject)
-            .getObject() : (RepositoryObject) contextObject);
+        return (StatefulTargetObject) contextObject;
     }
 
     private TextField makeTextField(final String colType) {
@@ -279,7 +266,7 @@ public class LogViewerExtension implements UIExtensionFactory {
 
         return t;
     }
-    
+
     private String normalize(String input) {
         return input.toLowerCase().replaceAll("_", " ");
     }

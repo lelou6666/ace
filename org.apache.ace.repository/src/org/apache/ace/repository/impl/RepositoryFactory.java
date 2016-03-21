@@ -18,25 +18,31 @@
  */
 package org.apache.ace.repository.impl;
 
+import static org.apache.ace.repository.RepositoryConstants.REPOSITORY_BASE_DIR;
+import static org.apache.ace.repository.RepositoryConstants.REPOSITORY_CUSTOMER;
+import static org.apache.ace.repository.RepositoryConstants.REPOSITORY_FILE_EXTENSION;
+import static org.apache.ace.repository.RepositoryConstants.REPOSITORY_INITIAL_CONTENT;
+import static org.apache.ace.repository.RepositoryConstants.REPOSITORY_LIMIT;
+import static org.apache.ace.repository.RepositoryConstants.REPOSITORY_MASTER;
+import static org.apache.ace.repository.RepositoryConstants.REPOSITORY_NAME;
+
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.util.Dictionary;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 import org.apache.ace.repository.Repository;
 import org.apache.ace.repository.RepositoryReplication;
-import org.apache.ace.repository.impl.constants.RepositoryConstants;
 import org.apache.felix.dm.Component;
 import org.apache.felix.dm.DependencyManager;
 import org.osgi.framework.BundleContext;
 import org.osgi.service.cm.ConfigurationException;
 import org.osgi.service.cm.ManagedServiceFactory;
 import org.osgi.service.log.LogService;
-import org.osgi.service.prefs.BackingStoreException;
-import org.osgi.service.prefs.Preferences;
-import org.osgi.service.prefs.PreferencesService;
 
 /**
  * A <code>ManagedServiceFactory</code> responsible for creating a (<code>Replication</code>)<code>Repository</code>
@@ -44,138 +50,230 @@ import org.osgi.service.prefs.PreferencesService;
  */
 public class RepositoryFactory implements ManagedServiceFactory {
 
-    private volatile LogService m_log;                     /* injected by dependency manager */
-    private volatile BundleContext m_context;              /* injected by dependency manager */
-    private volatile PreferencesService m_prefsService;    /* injected by dependency manager */
+    public static class Entry {
+        private final String m_customer;
+        private final String m_name;
 
-    private File m_tempDir;
-    private File m_baseDir;
-    private Preferences m_prefs;
+        public Entry(String customer, String name) {
+            m_customer = customer;
+            m_name = name;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (obj == null || getClass() != obj.getClass()) {
+                return false;
+            }
+            Entry other = (Entry) obj;
+            if (!m_customer.equals(other.m_customer)) {
+                return false;
+            }
+            if (!m_name.equals(other.m_name)) {
+                return false;
+            }
+            return true;
+        }
+
+        @Override
+        public int hashCode() {
+            final int prime = 37;
+            int result = 1;
+            result = prime * result + ((m_customer == null) ? 0 : m_customer.hashCode());
+            result = prime * result + ((m_name == null) ? 0 : m_name.hashCode());
+            return result;
+        }
+        
+        @Override
+        public String toString() {
+            return String.format("%s :: %s", m_customer, m_name);
+        }
+    }
+
+    private final ConcurrentMap<String, Component> m_instances = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Entry, String> m_index = new ConcurrentHashMap<>();
     private final DependencyManager m_manager;
-    private final Map<String, Component> m_instances = new HashMap<String, Component>();
+
+    /* injected by dependency manager */
+    private volatile LogService m_log;
+    private volatile BundleContext m_context;
+    // locally managed
+    private File m_tempDir;
 
     public RepositoryFactory(DependencyManager manager) {
         m_manager = manager;
     }
 
-    public synchronized void deleted(String pid) {
-        // pull service
+    public void deleted(String pid) {
+        // remove repository service...
         Component service = m_instances.remove(pid);
         if (service != null) {
-            m_manager.remove(service);
-        }
+            RepositoryImpl repository = (RepositoryImpl) service.getInstance();
+            File repoDir = repository.getDir();
 
-        // remove persisted data
-        File dir = new File(m_baseDir, pid);
-        if (dir.isDirectory()) {
-            File[] files = dir.listFiles();
-            for (int i = 0; (files != null) && (i < files.length); i++) {
-                files[i].delete();
+            m_manager.remove(service);
+            
+            // update our local index...
+            Map<Entry, String> index = new HashMap<>(m_index);
+            for (Map.Entry<Entry, String> entry : index.entrySet()) {
+                if (pid.equals(entry.getValue())) {
+                    m_index.remove(entry.getKey(), entry.getValue());
+                }
             }
-            if (!dir.delete()) {
-                m_log.log(LogService.LOG_WARNING, "Unable to clean up files ( in " + dir.getAbsolutePath() + ") after removing repository");
-            }
-        }
-        try {
-            m_prefs.node(pid).removeNode();
-            m_prefs.sync();
-        }
-        catch (BackingStoreException e) {
-            // Not much we can do
+
+            // remove persisted data...
+            deleteRepositoryStore(pid, repoDir);
         }
     }
 
+    @Override
     public String getName() {
         return "RepositoryFactory";
     }
 
-    public synchronized void init() {
-        m_tempDir = m_context.getDataFile("tmp");
-        if ((m_tempDir != null) && !m_tempDir.isDirectory() && !m_tempDir.mkdirs()) {
-            throw new IllegalArgumentException("Unable to create temp directory (" + m_tempDir.getAbsolutePath() + ")");
-        }
-        m_baseDir = m_context.getDataFile("repos");
-        if ((m_baseDir != null) && !m_baseDir.isDirectory() && !m_baseDir.mkdirs()) {
-            throw new IllegalArgumentException("Unable to create base directory (" + m_baseDir.getAbsolutePath() + ")");
-        }
+    /**
+     * Called by Felix DM.
+     */
+    public void init() throws IOException {
+        m_tempDir = ensureDirectoryAvailable(m_context.getDataFile("tmp"));
     }
 
     /**
      * Creates a new instance if the supplied dictionary contains a valid configuration. A configuration is valid if
-     * <code>RepositoryConstants.REPOSITORY_NAME</code> and <code>RepositoryConstants.REPOSITORY_CUSTOMER</code> properties
-     * are present, not empty and the combination of the two is unique in respect to other previously created instances.
-     * Finally a property <code>RepositoryConstants.REPOSITORY_MASTER</code> should be present and be either <code>true</code>
-     * or <code>false</code>.
-     *
-     * @param pid A unique identifier for the instance, generated by <code>ConfigurationAdmin</code> normally.
-     * @param dict The configuration properties for the instance, see description above.
-     * @throws ConfigurationException If any of the above explanation fails <b>or</b>when there is an internal error creating the repository.
+     * <code>RepositoryConstants.REPOSITORY_NAME</code> and <code>RepositoryConstants.REPOSITORY_CUSTOMER</code>
+     * properties are present, not empty and the combination of the two is unique in respect to other previously created
+     * instances. Finally a property <code>RepositoryConstants.REPOSITORY_MASTER</code> should be present and be either
+     * <code>true</code> or <code>false</code>.
+     * 
+     * @param pid
+     *            A unique identifier for the instance, generated by <code>ConfigurationAdmin</code> normally.
+     * @param dict
+     *            The configuration properties for the instance, see description above.
+     * @throws ConfigurationException
+     *             If any of the above explanation fails <b>or</b>when there is an internal error creating the
+     *             repository.
      */
-    @SuppressWarnings("unchecked")
-    public synchronized void updated(String pid, Dictionary dict) throws ConfigurationException {
-        String name = (String) dict.get(RepositoryConstants.REPOSITORY_NAME);
-        if ((name == null) || "".equals(name)) {
-            throw new ConfigurationException(RepositoryConstants.REPOSITORY_NAME, "Repository name has to be specified.");
-        }
-
-        String customer = (String) dict.get(RepositoryConstants.REPOSITORY_CUSTOMER);
+    public void updated(String pid, Dictionary<String, ?> dict) throws ConfigurationException {
+        String customer = (String) dict.get(REPOSITORY_CUSTOMER);
         if ((customer == null) || "".equals(customer)) {
-            throw new ConfigurationException(RepositoryConstants.REPOSITORY_CUSTOMER, "Repository customer has to be specified.");
+            throw new ConfigurationException(REPOSITORY_CUSTOMER, "Repository customer has to be specified.");
         }
 
-        String master = (String) dict.get(RepositoryConstants.REPOSITORY_MASTER);
+        String name = (String) dict.get(REPOSITORY_NAME);
+        if ((name == null) || "".equals(name)) {
+            throw new ConfigurationException(REPOSITORY_NAME, "Repository name has to be specified.");
+        }
+        
+        // Check whether the combination of customer and name is unique...
+        Entry newEntry = new Entry(customer, name);
+        String oldPid = m_index.putIfAbsent(newEntry, pid);
+        if (oldPid != null && !pid.equals(oldPid)) {
+            throw new ConfigurationException(null, "Name and customer combination already exists");
+        }
+
+        String master = (String) dict.get(REPOSITORY_MASTER);
         if (!("false".equalsIgnoreCase(master.trim()) || "true".equalsIgnoreCase(master.trim()))) {
-            throw new ConfigurationException(RepositoryConstants.REPOSITORY_MASTER, "Have to specify whether the repository is the master or a slave.");
+            throw new ConfigurationException(REPOSITORY_MASTER, "Have to specify whether the repository is the master or a slave.");
         }
         boolean isMaster = Boolean.parseBoolean(master);
 
-        String initialContents = (String) dict.get(RepositoryConstants.REPOSITORY_INITIAL_CONTENT);
-
-        if (m_prefs == null) {
-            m_prefs = m_prefsService.getSystemPreferences();
+        String fileExtension = (String) dict.get(REPOSITORY_FILE_EXTENSION);
+        if ((fileExtension == null) || "".equals(fileExtension.trim())) {
+            fileExtension = "";
         }
 
-        String[] nodes;
-        try {
-            nodes = m_prefs.childrenNames();
+        String baseDirName = (String) dict.get(REPOSITORY_BASE_DIR);
+        File baseDir;
+        if (baseDirName == null || "".equals(baseDirName.trim())) {
+            baseDir = m_context.getDataFile("repos");
         }
-        catch (BackingStoreException e) {
-            throw new ConfigurationException("none", "Internal error while validating configuration.");
+        else {
+            baseDir = new File(baseDirName);
         }
-        for (int i = 0; i < nodes.length; i++) {
-            Preferences node = m_prefs.node(nodes[i]);
-            if (name.equalsIgnoreCase(node.get(RepositoryConstants.REPOSITORY_NAME, "")) && name.equalsIgnoreCase(node.get(RepositoryConstants.REPOSITORY_CUSTOMER, ""))) {
-                throw new ConfigurationException("name and customer", "Name and customer combination already exists");
+
+        String limit = (String) dict.get(REPOSITORY_LIMIT);
+        long limitValue = Long.MAX_VALUE;
+        if (limit != null) {
+            try {
+                limitValue = Long.parseLong(limit);
+            }
+            catch (NumberFormatException nfe) {
+                throw new ConfigurationException(REPOSITORY_LIMIT, "Limit has to be a number, was: " + limit);
+            }
+            if (limitValue < 1) {
+                throw new ConfigurationException(REPOSITORY_LIMIT, "Limit has to be at least 1, was " + limit);
             }
         }
 
-        Preferences node = m_prefs.node(pid);
-        node.put(RepositoryConstants.REPOSITORY_NAME, name);
-        node.put(RepositoryConstants.REPOSITORY_CUSTOMER, customer);
+        String initialContents = (String) dict.get(REPOSITORY_INITIAL_CONTENT);
 
-        Component service = m_instances.get(pid);
-        if (service == null) {
-            // new instance
-            File dir = new File(m_baseDir, pid);
-            RepositoryImpl store = new RepositoryImpl(dir, m_tempDir, isMaster);
-            if ((initialContents != null) && isMaster) {
-                try {
-                    store.commit(new ByteArrayInputStream(initialContents.getBytes()), 0);
-                }
-                catch (IOException e) {
-                    m_log.log(LogService.LOG_ERROR, "Unable to set initial contents of the repository.", e);
-                }
-            }
-            service = m_manager.createComponent()
-                .setInterface(new String[] {RepositoryReplication.class.getName(), Repository.class.getName()}, dict)
-                .setImplementation(store)
-                .add(m_manager.createServiceDependency().setService(LogService.class).setRequired(false));
+        Component service = m_manager.createComponent()
+            .setInterface(new String[] { RepositoryReplication.class.getName(), Repository.class.getName() }, dict)
+            .setImplementation(createRepositoryStore(pid, baseDir, isMaster, limitValue, fileExtension, initialContents))
+            .add(m_manager.createServiceDependency().setService(LogService.class).setRequired(false));
+
+        Component oldService = m_instances.putIfAbsent(pid, service);
+        if (oldService == null) {
+            // new instance...
             m_manager.add(service);
-            m_instances.put(pid, service);
-        } else {
-            // update existing instance
-            RepositoryImpl store = (RepositoryImpl) service.getService();
-            store.updated(isMaster);
         }
+        else {
+            // update existing instance...
+            RepositoryImpl store = (RepositoryImpl) oldService.getInstance();
+
+            // be a little pedantic about the ignored properties...
+            if (!baseDir.equals(store.getDir())) {
+                m_log.log(LogService.LOG_WARNING, "Cannot update base directory of repository from " + store.getDir() + " to " + baseDir);
+            }
+            if (!fileExtension.equals(store.getFileExtension())) {
+                m_log.log(LogService.LOG_WARNING, "Cannot update file extension of repository from " + store.getFileExtension() + " to " + fileExtension);
+            }
+
+            store.updated(isMaster, limitValue);
+        }
+    }
+
+    private RepositoryImpl createRepositoryStore(String pid, File baseDir, boolean isMaster, long limitValue, String fileExtension, String initialContents) {
+        File dir = ensureDirectoryAvailable(new File(baseDir, pid));
+        RepositoryImpl store = new RepositoryImpl(dir, m_tempDir, fileExtension, isMaster, limitValue);
+        if ((initialContents != null) && isMaster) {
+            try {
+                // Do not even try to commit initial contents for existing repositories...
+                if (store.getRange().getHigh() == 0L) {
+                    store.commit(new ByteArrayInputStream(initialContents.getBytes()), 0L);
+                }
+            }
+            catch (IOException e) {
+                m_log.log(LogService.LOG_ERROR, "Unable to set initial contents of the repository.", e);
+            }
+        }
+        return store;
+    }
+
+    private void deleteRepositoryStore(String pid, File repoDir) {
+        if (repoDir.exists() && repoDir.isDirectory()) {
+            File[] files = repoDir.listFiles();
+            for (int i = 0; (files != null) && (i < files.length); i++) {
+                files[i].delete();
+            }
+            if (!repoDir.delete()) {
+                m_log.log(LogService.LOG_WARNING, "Unable to clean up files in " + repoDir.getAbsolutePath() + " after removing repository!");
+            }
+        }
+    }
+
+    private File ensureDirectoryAvailable(File dir) {
+        if (dir == null) {
+            throw new IllegalArgumentException("Unable to use file system!");
+        }
+        if (dir.exists() && dir.isFile()) {
+            dir.delete();
+        }
+        if (!dir.exists() && !dir.mkdirs()) {
+            throw new IllegalArgumentException("Unable to create directory: " + dir.getAbsolutePath() + "!");
+        }
+        return dir;
     }
 }

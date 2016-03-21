@@ -24,10 +24,13 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.ArrayList;
 import java.util.Dictionary;
+import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
+import org.apache.ace.feedback.Event;
 import org.apache.ace.identification.Identification;
-import org.apache.ace.log.LogEvent;
 import org.apache.ace.log.target.store.LogStore;
 import org.osgi.service.log.LogService;
 
@@ -149,7 +152,7 @@ public class LogStoreImpl implements LogStore {
     public synchronized List get(long logID, long from, long to)
             throws IOException {
         Store store = getLog(logID);
-        List result = new ArrayList();
+        List<Event> result = new ArrayList<>();
         try {
             if (store.getCurrent() > from) {
                 store.reset();
@@ -158,7 +161,7 @@ public class LogStoreImpl implements LogStore {
             while (store.hasNext()) {
                 long eventID = store.readCurrentID();
                 if ((eventID >= from) && (eventID <= to)) {
-                    result.add(new LogEvent(new String(store.read())));
+                    result.add(new Event(new String(store.read())));
                 } else {
                     store.skip();
                 }
@@ -245,15 +248,22 @@ public class LogStoreImpl implements LogStore {
      * 
      * @param type
      *            the type the event.
-     * @param props
+     * @param dict
      *            the properties of the event.
      * @return the new event.
      * @throws java.io.IOException
      *             in case of any IO error.
      */
-    public synchronized LogEvent put(int type, Dictionary props) throws IOException {
+    public synchronized Event put(int type, Dictionary dict) throws IOException {
         try {
-            LogEvent result = new LogEvent(null, m_store.getId(), getNextID(), System.currentTimeMillis(), type, props);
+            Map<String, String> props = new HashMap<>();
+            Enumeration<?> keys = dict.keys();
+            while (keys.hasMoreElements()) {
+                String key = (String) keys.nextElement();
+                props.put(key, (String) dict.get(key));
+            }
+            
+            Event result = new Event(null, m_store.getId(), getNextID(), System.currentTimeMillis(), type, props);
             m_store.append(result.getID(), result.toRepresentation().getBytes());
             return result;
         } 
@@ -427,6 +437,7 @@ public class LogStoreImpl implements LogStore {
             return m_store.getFilePointer() < m_store.length();
         }
 
+        @SuppressWarnings("unused")
         public byte[] read() throws IOException {
             long pos = m_store.getFilePointer();
             try {
@@ -486,6 +497,7 @@ public class LogStoreImpl implements LogStore {
          * @throws java.io.IOException
          *             in case of any IO error or if there is no record left.
          */
+        @SuppressWarnings("unused")
         public void skip() throws IOException {
             long pos = m_store.getFilePointer();
             try {
@@ -515,7 +527,6 @@ public class LogStoreImpl implements LogStore {
             long pos = m_store.getFilePointer();
             try {
                 m_store.seek(m_store.length());
-                long current = m_store.getFilePointer();
                 m_store.writeLong(id);
                 m_store.writeInt(entry.length);
                 m_store.write(entry);

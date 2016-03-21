@@ -1,6 +1,8 @@
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
 Private-Package: org.apache.ace.deployment.streamgenerator.impl
 Bundle-Activator: org.apache.ace.deployment.streamgenerator.impl.Activator
 Export-Package: org.apache.ace.deployment.streamgenerator
-Bundle-Version: 1.0.0
+Bundle-Version: 1.0.3
 Bundle-Name: Apache ACE Deployment StreamGenerator
 Bundle-Description: Registers a Deployment StreamGenerator service

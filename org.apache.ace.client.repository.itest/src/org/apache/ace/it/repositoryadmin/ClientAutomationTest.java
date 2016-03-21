@@ -20,15 +20,16 @@
 package org.apache.ace.it.repositoryadmin;
 
 import java.util.ArrayList;
+import java.util.Dictionary;
+import java.util.Hashtable;
 import java.util.List;
-import java.util.Properties;
 import java.util.concurrent.Callable;
 
+import org.amdatu.scheduling.Job;
 import org.apache.ace.client.repository.RepositoryAdmin;
 import org.apache.ace.client.repository.stateful.StatefulTargetObject;
-import org.apache.ace.log.AuditEvent;
-import org.apache.ace.log.LogEvent;
-import org.apache.ace.scheduler.constants.SchedulerConstants;
+import org.apache.ace.feedback.AuditEvent;
+import org.apache.ace.feedback.Event;
 import org.osgi.framework.Constants;
 import org.osgi.service.cm.Configuration;
 import org.osgi.util.tracker.ServiceTracker;
@@ -43,14 +44,14 @@ public class ClientAutomationTest extends BaseRepositoryAdminTest {
      * to do with this operator.
      */
     public void testAutoTargetOperator() throws Exception {
-        startRepositoryService();
+        createTestUser();
 
         addRepository("storeInstance", "apache", "store", true);
         addRepository("targetInstance", "apache", "target", true);
         addRepository("deploymentInstance", "apache", "deployment", true);
 
         // configure automation bundle; new configuration properties; bundle will start
-        final Properties props = new Properties();
+        final Dictionary<String, Object> props = new Hashtable<>();
         props.put("registerTargetFilter", "(id=anotherTarget*)");
         props.put("approveTargetFilter", "(id=DO_NOTHING)");
         props.put("autoApproveTargetFilter", "(id=anotherTarget*)");
@@ -60,6 +61,7 @@ public class ClientAutomationTest extends BaseRepositoryAdminTest {
         props.put("storeRepository", "store");
         props.put("customerName", "apache");
         props.put("hostName", HOST);
+        props.put("userName", TEST_USER_NAME);
         props.put("endpoint", ENDPOINT_NAME);
 
         final Configuration config = m_configAdmin.getConfiguration("org.apache.ace.client.automation", null);
@@ -85,27 +87,26 @@ public class ClientAutomationTest extends BaseRepositoryAdminTest {
     }
 
     private void doAutoTargetReg() throws Exception {
-        List<LogEvent> events = new ArrayList<LogEvent>();
-        Properties props = new Properties();
-        events.add(new LogEvent("anotherTarget", 1, 1, 1, AuditEvent.FRAMEWORK_STARTED, props));
+        List<Event> events = new ArrayList<>();
+        events.add(new Event("anotherTarget", 1, 1, 1, AuditEvent.FRAMEWORK_STARTED));
         // fill auditlog; no install data
         m_auditLogStore.put(events);
 
         int initRepoSize = m_statefulTargetRepository.get().size();
 
         // Get the processauditlog task and run it
-        ServiceTracker tracker = new ServiceTracker(m_bundleContext, m_bundleContext.createFilter("(&(" + Constants.OBJECTCLASS + "="
-                + Runnable.class.getName() + ")(" + SchedulerConstants.SCHEDULER_NAME_KEY + "="
+        ServiceTracker<Job, Job> tracker = new ServiceTracker<>(
+            m_bundleContext, m_bundleContext.createFilter("(&(" + Constants.OBJECTCLASS + "="
+                + Job.class.getName() + ")(name="
                 + "org.apache.ace.client.processauditlog" + "))"), null);
         tracker.open();
 
-        final Runnable processAuditlog = (Runnable) tracker.waitForService(2000);
-
+        final Job processAuditlog = tracker.waitForService(2000);
         if (processAuditlog != null) {
             // commit should be called
             runAndWaitForEvent(new Callable<Object>() {
                 public Object call() throws Exception {
-                    processAuditlog.run();
+                    processAuditlog.execute();
                     return null;
                 }
             }, false, RepositoryAdmin.TOPIC_REFRESH);
@@ -122,11 +123,11 @@ public class ClientAutomationTest extends BaseRepositoryAdminTest {
 
             // add a target which will not be autoregistered
             events.clear();
-            events.add(new LogEvent("secondTarget", 1, 1, 1, AuditEvent.FRAMEWORK_STARTED, props));
+            events.add(new Event("secondTarget", 1, 1, 1, AuditEvent.FRAMEWORK_STARTED));
             m_auditLogStore.put(events);
 
             // do auto target action
-            processAuditlog.run();
+            processAuditlog.execute();
             assertEquals("After refresh, we expect an additional target based on auditlogdata;", initRepoSize + 2, m_statefulTargetRepository.get().size());
 
             sgoList = m_statefulTargetRepository.get(m_bundleContext.createFilter("(id=second*)"));

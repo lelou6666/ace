@@ -29,83 +29,84 @@ import org.apache.ace.client.repository.object.Feature2DistributionAssociation;
 import org.apache.ace.client.repository.object.FeatureObject;
 import org.apache.ace.client.repository.repository.FeatureRepository;
 import org.apache.ace.webui.UIExtensionFactory;
-import org.apache.ace.webui.vaadin.AssociationRemover;
-import org.apache.ace.webui.vaadin.Associations;
+import org.apache.ace.webui.vaadin.AssociationManager;
 
 import com.vaadin.data.Item;
 
 /**
  * Provides an object panel for displaying features.
  */
-public abstract class FeaturesPanel extends BaseObjectPanel<FeatureObject, FeatureRepository> {
+public abstract class FeaturesPanel extends BaseObjectPanel<FeatureObject, FeatureRepository, ArtifactObject, DistributionObject> {
 
     /**
      * Creates a new {@link FeaturesPanel} instance.
      * 
-     * @param associations the assocation-holder object;
-     * @param associationRemover the helper for removing associations.
+     * @param associations
+     *            the assocation-holder object;
+     * @param associationRemover
+     *            the helper for removing associations.
      */
-    public FeaturesPanel(Associations associations, AssociationRemover associationRemover) {
-        super(associations, associationRemover, "Feature", UIExtensionFactory.EXTENSION_POINT_VALUE_FEATURE, true);
+    public FeaturesPanel(AssociationHelper associations, AssociationManager associationRemover) {
+        super(associations, associationRemover, "Feature", UIExtensionFactory.EXTENSION_POINT_VALUE_FEATURE, true, FeatureObject.class);
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
-    protected boolean doRemoveLeftSideAssociation(FeatureObject object, RepositoryObject other) {
-        List<Artifact2FeatureAssociation> associations = object.getAssociationsWith((ArtifactObject) other);
+    protected Artifact2FeatureAssociation doCreateLeftSideAssociation(String artifactId, String featureId) {
+        return m_associationManager.createArtifact2FeatureAssociation(artifactId, featureId);
+    }
+
+    @Override
+    protected Feature2DistributionAssociation doCreateRightSideAssociation(String featureId, String distributionId) {
+        return m_associationManager.createFeature2DistributionAssociation(featureId, distributionId);
+    }
+
+    @Override
+    protected boolean doRemoveLeftSideAssociation(ArtifactObject artifact, FeatureObject feature) {
+        List<Artifact2FeatureAssociation> associations = feature.getAssociationsWith(artifact);
         for (Artifact2FeatureAssociation association : associations) {
-            m_associationRemover.removeAssociation(association);
+            m_associationManager.removeAssociation(association);
         }
         return true;
     }
-    
-    /**
-     * {@inheritDoc}
-     */
+
     @Override
-    protected boolean doRemoveRightSideAssociation(FeatureObject object, RepositoryObject other) {
-        List<Feature2DistributionAssociation> associations = object.getAssociationsWith((DistributionObject) other);
+    protected boolean doRemoveRightSideAssociation(FeatureObject feature, DistributionObject distribution) {
+        List<Feature2DistributionAssociation> associations = feature.getAssociationsWith(distribution);
         for (Feature2DistributionAssociation association : associations) {
-            m_associationRemover.removeAssociation(association);
+            m_associationManager.removeAssociation(association);
         }
         return true;
     }
-    
-    /**
-     * {@inheritDoc}
-     */
+
+    @Override
+    protected String getDisplayName(FeatureObject object) {
+        return object.getName();
+    }
+
+    @Override
     protected void handleEvent(String topic, RepositoryObject entity, org.osgi.service.event.Event event) {
         FeatureObject feature = (FeatureObject) entity;
         if (FeatureObject.TOPIC_ADDED.equals(topic)) {
-            add(feature);
+            addToTable(feature);
         }
         if (FeatureObject.TOPIC_REMOVED.equals(topic)) {
-            remove(feature);
+            removeFromTable(feature);
         }
         if (FeatureObject.TOPIC_CHANGED.equals(topic) || RepositoryAdmin.TOPIC_STATUSCHANGED.equals(topic)) {
             update(feature);
         }
     }
-    
-    /**
-     * {@inheritDoc}
-     */
+
     @Override
     protected boolean isSupportedEntity(RepositoryObject entity) {
         return entity instanceof FeatureObject;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     protected void populateItem(FeatureObject feature, Item item) {
-        item.getItemProperty(WORKING_STATE_ICON).setValue(getWorkingStateIcon(feature));
         item.getItemProperty(OBJECT_NAME).setValue(feature.getName());
         item.getItemProperty(OBJECT_DESCRIPTION).setValue(feature.getDescription());
-        item.getItemProperty(ACTIONS).setValue(createActionButtons(feature));
+        item.getItemProperty(ACTION_UNLINK).setValue(createRemoveLinkButton(feature));
+        item.getItemProperty(ACTION_DELETE).setValue(createRemoveItemButton(feature));
     }
 }
-

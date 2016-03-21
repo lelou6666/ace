@@ -1,10 +1,20 @@
+<<<<<<< HEAD
 -buildpath: ${^-buildpath}, osgi.core,\
+=======
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
+-buildpath: \
+	${^-buildpath},\
+	${testng},\
+	osgi.core;version=6.0.0,\
+>>>>>>> refs/remotes/apache/trunk
 	osgi.cmpn,\
 	org.apache.felix.dependencymanager,\
-	org.apache.ace.scheduler.api;version=latest,\
+	org.amdatu.scheduling.api,\
 	org.apache.ace.client.repository.api;version=latest
+
 Private-Package: org.apache.ace.client.automation
 Bundle-Activator: org.apache.ace.client.automation.Activator
-Bundle-Version: 1.0.0
+Bundle-Version: 1.0.3
 Bundle-Name: Apache ACE Client Automation
 Bundle-Description: Provides automation tasks for the Apache ACE client

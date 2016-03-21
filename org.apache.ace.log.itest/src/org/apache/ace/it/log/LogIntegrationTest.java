@@ -18,25 +18,21 @@
  */
 package org.apache.ace.it.log;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.ace.discovery.property.constants.DiscoveryConstants;
-import org.apache.ace.http.listener.constants.HttpConstants;
-import org.apache.ace.identification.property.constants.IdentificationConstants;
+import org.amdatu.scheduling.Job;
+import org.apache.ace.discovery.DiscoveryConstants;
+import org.apache.ace.feedback.Descriptor;
+import org.apache.ace.feedback.Event;
+import org.apache.ace.identification.IdentificationConstants;
 import org.apache.ace.it.IntegrationTestBase;
 import org.apache.ace.log.Log;
-import org.apache.ace.log.LogDescriptor;
-import org.apache.ace.log.LogEvent;
 import org.apache.ace.log.server.store.LogStore;
 import org.apache.ace.test.constants.TestConstants;
 import org.apache.felix.dm.Component;
-import org.osgi.framework.Constants;
 import org.osgi.service.http.HttpService;
 
 /**
@@ -45,9 +41,7 @@ import org.osgi.service.http.HttpService;
  * replicated to the server.
  */
 public class LogIntegrationTest extends IntegrationTestBase {
-
 	private static final String AUDITLOG = "/auditlog";
-    private static final String DEPLOYMENT = "/deployment";
 
     public static final String HOST = "localhost";
     public static final String TARGET_ID = "target-id";
@@ -55,7 +49,7 @@ public class LogIntegrationTest extends IntegrationTestBase {
     private volatile Log m_auditLog;
     private volatile LogStore m_serverStore;
 
-    private volatile Runnable m_auditLogSyncTask;
+    private volatile Job m_auditLogSyncTask;
     
     public void testLog() throws Exception {
     	// XXX there appears to be a dependency between both these test-methods!!!
@@ -75,16 +69,17 @@ public class LogIntegrationTest extends IntegrationTestBase {
         configureFactory("org.apache.ace.target.log.factory",
                 "name", "auditlog");
         configureFactory("org.apache.ace.target.log.sync.factory",
-            "name", "auditlog", "authentication.enabled", "false");
+                "name", "auditlog");
 
-        configure("org.apache.ace.deployment.servlet",
-                HttpConstants.ENDPOINT, DEPLOYMENT, "authentication.enabled", "false");
-
+        configure("org.apache.ace.log.server.store.filebased", 
+                "MaxEvents", "0");
+        
         configureFactory("org.apache.ace.log.server.servlet.factory",
-                "name", "auditlog",
-                HttpConstants.ENDPOINT, AUDITLOG, "authentication.enabled", "false");
+                "name", "auditlog", "endpoint", AUDITLOG);
         configureFactory("org.apache.ace.log.server.store.factory",
                 "name", "auditlog");
+
+        configure("org.apache.ace.http.context", "authentication.enabled", "false");
     }
 
     protected Component[] getDependencies() {
@@ -92,9 +87,9 @@ public class LogIntegrationTest extends IntegrationTestBase {
             createComponent()
                 .setImplementation(this)
                 .add(createServiceDependency().setService(HttpService.class).setRequired(true))
-                .add(createServiceDependency().setService(Log.class, "(&("+ Constants.OBJECTCLASS+"="+Log.class.getName()+")(name=auditlog))").setRequired(true))
-                .add(createServiceDependency().setService(LogStore.class, "(&("+Constants.OBJECTCLASS+"="+LogStore.class.getName()+")(name=auditlog))").setRequired(true))
-                .add(createServiceDependency().setService(Runnable.class, "(&("+Constants.OBJECTCLASS+"="+Runnable.class.getName()+")(taskName=auditlog))").setRequired(true))
+                .add(createServiceDependency().setService(Log.class, "(name=auditlog)").setRequired(true))
+                .add(createServiceDependency().setService(LogStore.class, "(name=auditlog)").setRequired(true))
+                .add(createServiceDependency().setService(Job.class, "(taskName=auditlog)").setRequired(true))
         };
     }
 
@@ -109,17 +104,17 @@ public class LogIntegrationTest extends IntegrationTestBase {
         long startTime = System.currentTimeMillis();
         while ((!found) && (System.currentTimeMillis() - startTime < 5000)) {
             // synchronize again
-            m_auditLogSyncTask.run();
+            m_auditLogSyncTask.execute();
 
             // get and evaluate results (note that there is some concurrency that might interfere with this test)
-            List<LogDescriptor> ranges2 = m_serverStore.getDescriptors();
+            List<Descriptor> ranges2 = m_serverStore.getDescriptors();
             if (ranges2.size() > 0) {
             	assertEquals("We should still have audit log events for one target on the server, but found " + ranges2.size(), 1, ranges2.size()); 
-                LogDescriptor range = ranges2.get(0);
-                List<LogEvent> events = m_serverStore.get(range);
+                Descriptor range = ranges2.get(0);
+                List<Event> events = m_serverStore.get(range);
                 if (events.size() > 1) {
                 	assertTrue("We should have a couple of events, at least more than the one we added ourselves.", events.size() > 1);
-                    for (LogEvent event : events) {
+                    for (Event event : events) {
                         if (event.getType() == 12345) {
                             assertEquals("We could not retrieve a property of our audit log event.", "value2", event.getProperties().get("two"));
                             found = true;
@@ -139,11 +134,11 @@ public class LogIntegrationTest extends IntegrationTestBase {
 
     private void doTestServlet() throws Exception {
         // prepare the store
-        List<LogEvent> events = new ArrayList<LogEvent>();
-        events.add(new LogEvent("42", 1, 1, 1, 1, new Properties()));
-        events.add(new LogEvent("47", 1, 1, 1, 1, new Properties()));
-        events.add(new LogEvent("47", 2, 1, 1, 1, new Properties()));
-        events.add(new LogEvent("47", 2, 2, 1, 1, new Properties()));
+        List<Event> events = new ArrayList<>();
+        events.add(new Event("42", 1, 1, 1, 1));
+        events.add(new Event("47", 1, 1, 1, 1));
+        events.add(new Event("47", 2, 1, 1, 1));
+        events.add(new Event("47", 2, 2, 1, 1));
         m_serverStore.put(events);
 
         List<String> result = getResponse("http://localhost:" + TestConstants.PORT + "/auditlog/query");

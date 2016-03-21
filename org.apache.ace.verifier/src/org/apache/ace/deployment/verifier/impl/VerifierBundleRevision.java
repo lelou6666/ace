@@ -37,6 +37,8 @@ import org.osgi.framework.wiring.BundleCapability;
 import org.osgi.framework.wiring.BundleRequirement;
 import org.osgi.framework.wiring.BundleRevision;
 import org.osgi.framework.wiring.BundleWiring;
+import org.osgi.resource.Capability;
+import org.osgi.resource.Requirement;
 
 /**
  *
@@ -84,7 +86,7 @@ public class VerifierBundleRevision implements BundleRevision {
             return Collections.emptyList();
         }
 
-        List<BundleCapability> aliasCaps = new ArrayList<BundleCapability>(capabilities);
+        List<BundleCapability> aliasCaps = new ArrayList<>(capabilities);
 
         for (int capIdx = 0; capIdx < aliasCaps.size(); capIdx++)
         {
@@ -100,7 +102,7 @@ public class VerifierBundleRevision implements BundleRevision {
                 if (Constants.BUNDLE_SYMBOLICNAME_ATTRIBUTE.equalsIgnoreCase(entry.getKey()))
                 {
                     // Make a copy of the attribute array.
-                    Map<String, Object> aliasAttrs = new HashMap<String, Object>(attributes);
+                    Map<String, Object> aliasAttrs = new HashMap<>(attributes);
                     // Add the aliased value.
                     aliasAttrs.put(Constants.BUNDLE_SYMBOLICNAME_ATTRIBUTE, new String[] { (String) entry.getValue(), Constants.SYSTEM_BUNDLE_SYMBOLICNAME });
                     // Create the aliased capability to replace the old capability.
@@ -141,12 +143,26 @@ public class VerifierBundleRevision implements BundleRevision {
 	public List<BundleCapability> getDeclaredCapabilities(String namespace) {
 		return m_declaredCaps;
 	}
+	
+    /**
+     * {@inheritDoc}
+     */
+	public List<Capability> getCapabilities(String namespace) {
+	    return new ArrayList<Capability>(m_declaredCaps);
+	}
 
     /**
      * {@inheritDoc}
      */
 	public List<BundleRequirement> getDeclaredRequirements(String namespace) {
 		return m_declaredReqs;
+	}
+
+    /**
+     * {@inheritDoc}
+     */
+	public List<Requirement> getRequirements(String namespace) {
+	    return new ArrayList<Requirement>(m_declaredReqs);
 	}
 	
     /**

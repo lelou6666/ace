@@ -1,33 +1,50 @@
+<<<<<<< HEAD
 Test-Cases: ${classes;CONCRETE;EXTENDS;org.apache.ace.it.IntegrationTestBase}
 -buildpath: ${^-buildpath},\
 	junit.osgi,\
 	osgi.core;version='[4.1,5)',\
+=======
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
+-buildpath: \
+	${^-buildpath},\
+	junit.osgi,\
+	osgi.core;version=6.0.0,\
+>>>>>>> refs/remotes/apache/trunk
 	osgi.cmpn,\
 	org.mockito.mockito-all,\
 	org.apache.ace.test;version=latest,\
-	org.apache.ace.http.listener;version=latest,\
 	org.apache.ace.repository.api;version=latest,\
-	org.apache.ace.repository.impl;version=latest,\
-	org.apache.ace.repository.servlet;version=latest,\
-	org.apache.felix.dependencymanager		
--runfw: org.apache.felix.framework;version='[4,5)'
--runvm: -ea
+	org.apache.felix.http.api,\
+	org.apache.felix.dependencymanager
+
+-runfw: org.apache.felix.framework;version='[5,6)'
 -runbundles: \
 	osgi.cmpn,\
 	org.apache.felix.log,\
 	org.apache.felix.dependencymanager,\
 	org.apache.felix.configadmin,\
 	org.apache.felix.prefs,\
+	org.apache.felix.http.servlet-api,\
 	org.apache.felix.http.jetty,\
 	org.apache.ace.deployment.provider.api;version=latest,\
 	org.apache.ace.authentication.api;version=latest,\
-	org.apache.ace.http.listener;version=latest,\
 	org.apache.ace.test;version=latest,\
 	org.apache.ace.range.api;version=latest,\
 	org.apache.ace.repository.api;version=latest,\
 	org.apache.ace.repository.impl;version=latest,\
-	org.apache.ace.repository.servlet;version=latest
+	org.apache.ace.repository.servlets;version=latest,\
+	org.apache.ace.http.context;version=latest
+-runvm: -ea
+-runee: JavaSE-1.7
+-runsystempackages: sun.reflect
+-runproperties: ${itestrunprops}
+-baseline:
+
+Test-Cases: ${classes;CONCRETE;EXTENDS;org.apache.ace.it.IntegrationTestBase}
+
 Private-Package: org.apache.ace.it.repository
+
 Bundle-Version: 1.0.0
 Bundle-Name: Apache ACE Repository itest
 Bundle-Description: Integration test bundle for Apache ACE Repository

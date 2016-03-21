@@ -1,5 +1,7 @@
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
 Bundle-Activator: org.apache.ace.repository.task.Activator
-Export-Package: org.apache.ace.repository.task
-Bundle-Version: 1.0.0
+Private-Package: org.apache.ace.repository.task
+Bundle-Version: 1.0.3
 Bundle-Name: Apache ACE Repository Task
 Bundle-Description: Registers a runnable task for repository replication

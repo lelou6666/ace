@@ -1,5 +1,7 @@
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
 Private-Package: org.apache.ace.authentication.processor.clientcert
 Bundle-Activator: org.apache.ace.authentication.processor.clientcert.Activator
-Bundle-Version: 1.0.0
+Bundle-Version: 1.0.2
 Bundle-Name: Apache ACE Authentication Clientcert processor
 Bundle-Description: Clientcert support for Apache ACE Authentication

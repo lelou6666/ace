@@ -1,6 +1,7 @@
-Private-Package: org.apache.ace.repository.impl,\
-	org.apache.ace.repository.impl.constants
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
+Private-Package: org.apache.ace.repository.impl
 Bundle-Activator: org.apache.ace.repository.impl.Activator
-Bundle-Version: 1.0.0
+Bundle-Version: 1.0.3
 Bundle-Name: Apache ACE Repository Service
 Bundle-Description: Registers a service factory for Repository services

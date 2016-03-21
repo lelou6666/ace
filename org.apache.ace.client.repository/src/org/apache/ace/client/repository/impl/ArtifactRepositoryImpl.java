@@ -22,12 +22,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLConnection;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,9 +40,9 @@ import org.apache.ace.client.repository.helper.bundle.BundleHelper;
 import org.apache.ace.client.repository.object.ArtifactObject;
 import org.apache.ace.client.repository.object.TargetObject;
 import org.apache.ace.client.repository.repository.ArtifactRepository;
+import org.apache.ace.client.repository.repository.RepositoryConfiguration;
 import org.apache.ace.connectionfactory.ConnectionFactory;
 import org.osgi.framework.BundleContext;
-import org.osgi.framework.Constants;
 import org.osgi.framework.Filter;
 import org.osgi.framework.InvalidSyntaxException;
 import org.osgi.framework.ServiceReference;
@@ -69,11 +68,10 @@ public class ArtifactRepositoryImpl extends ObjectRepositoryImpl<ArtifactObjectI
     private volatile LogService m_log;
     private volatile ConnectionFactory m_connectionFactory;
 
-    private final Map<String, ArtifactHelper> m_helpers = new HashMap<String, ArtifactHelper>();
-    private URL m_obrBase;
+    private final Map<String, ArtifactHelper> m_helpers = new HashMap<>();
 
-    public ArtifactRepositoryImpl(ChangeNotifier notifier) {
-        super(notifier, XML_NODE);
+    public ArtifactRepositoryImpl(ChangeNotifier notifier, RepositoryConfiguration repoConfig) {
+        super(notifier, XML_NODE, repoConfig);
     }
 
     public List<ArtifactObject> getResourceProcessors() {
@@ -83,7 +81,7 @@ public class ArtifactRepositoryImpl extends ObjectRepositoryImpl<ArtifactObjectI
         catch (InvalidSyntaxException e) {
             m_log.log(LogService.LOG_ERROR, "getResourceProcessors' filter returned an InvalidSyntaxException.", e);
         }
-        return new ArrayList<ArtifactObject>();
+        return new ArrayList<>();
     }
 
     @Override
@@ -96,25 +94,20 @@ public class ArtifactRepositoryImpl extends ObjectRepositoryImpl<ArtifactObjectI
         catch (InvalidSyntaxException e) {
             m_log.log(LogService.LOG_ERROR, "Extending " + filter.toString() + " resulted in an InvalidSyntaxException.", e);
         }
-        return new ArrayList<ArtifactObject>();
+        return new ArrayList<>();
     }
 
     @Override
     public List<ArtifactObject> get() {
         // Note that this excludes any Bundle artifacts which are resource processors.
         try {
+            // ??? should we do that to that key?
             return super.get(createFilter("(!(" + RepositoryUtil.escapeFilterValue(BundleHelper.KEY_RESOURCE_PROCESSOR_PID) + "=*))"));
         }
         catch (InvalidSyntaxException e) {
             m_log.log(LogService.LOG_ERROR, "get's filter returned an InvalidSyntaxException.", e);
         }
-        return new ArrayList<ArtifactObject>();
-    }
-
-    @Override
-    ArtifactObjectImpl createNewInhabitant(Map<String, String> attributes) {
-        ArtifactHelper helper = getHelper(attributes.get(ArtifactObject.KEY_MIMETYPE));
-        return new ArtifactObjectImpl(helper.checkAttributes(attributes), helper.getMandatoryAttributes(), this, this);
+        return new ArrayList<>();
     }
 
     @Override
@@ -207,29 +200,30 @@ public class ArtifactRepositoryImpl extends ObjectRepositoryImpl<ArtifactObjectI
         }
 
         // Get all published ArtifactRecognizers.
-        ServiceReference[] refs = null;
+        List<ServiceReference<ArtifactRecognizer>> refs = new ArrayList<>();
         try {
-            refs = m_context.getServiceReferences(ArtifactRecognizer.class.getName(), null);
+            Collection<ServiceReference<ArtifactRecognizer>> tmpRefs = m_context.getServiceReferences(ArtifactRecognizer.class, null);
+            refs.addAll(tmpRefs);
         }
         catch (InvalidSyntaxException e) {
             // We do not pass in a filter, so this should not happen.
             m_log.log(LogService.LOG_WARNING, "A null filter resulted in an InvalidSyntaxException from getServiceReferences.");
         }
 
-        if (refs == null) {
+        if (refs.isEmpty()) {
             throw new IllegalArgumentException("There are no artifact recognizers available.");
         }
 
-        // If available, sort the references by service ranking.
-        Arrays.sort(refs, SERVICE_RANK_COMPARATOR);
+        // Sort the references by service ranking.
+        Collections.sort(refs, Collections.reverseOrder());
 
         ArtifactResource resource = convertToArtifactResource(url);
 
         // Check all referenced services to find one that matches our input.
         ArtifactRecognizer recognizer = null;
         String foundMimetype = null;
-        for (ServiceReference ref : refs) {
-            ArtifactRecognizer candidate = (ArtifactRecognizer) m_context.getService(ref);
+        for (ServiceReference<ArtifactRecognizer> ref : refs) {
+            ArtifactRecognizer candidate = m_context.getService(ref);
             try {
                 if (mimetype != null) {
                     if (candidate.canHandle(mimetype)) {
@@ -256,7 +250,7 @@ public class ArtifactRepositoryImpl extends ObjectRepositoryImpl<ArtifactObjectI
         }
 
         // Package the results in the map.
-        Map<Class<?>, Object> result = new HashMap<Class<?>, Object>();
+        Map<Class<?>, Object> result = new HashMap<>();
         result.put(ArtifactRecognizer.class, recognizer);
         if (mimetype == null) {
             result.put(ArtifactHelper.class, getHelper(foundMimetype));
@@ -281,65 +275,53 @@ public class ArtifactRepositoryImpl extends ObjectRepositoryImpl<ArtifactObjectI
         }
     }
 
+    /**
+     * @return the OBR base URL to use, can be <code>null</code>.
+     */
+    public URL getObrBase() {
+        return getRepositoryConfiguration().getOBRLocation();
+    }
+
     public ArtifactObject importArtifact(URL artifact, boolean upload) throws IllegalArgumentException, IOException {
-        try {
-            if ((artifact == null) || (artifact.toString().length() == 0)) {
-                throw new IllegalArgumentException("The URL to import cannot be null or empty.");
-            }
-            checkURL(artifact);
-
-            Map<Class<?>, Object> fromArtifact = findRecognizerAndHelper(artifact);
-            ArtifactRecognizer recognizer = (ArtifactRecognizer) fromArtifact.get(ArtifactRecognizer.class);
-            ArtifactHelper helper = (ArtifactHelper) fromArtifact.get(ArtifactHelper.class);
-            String mimetype = (String) fromArtifact.get(String.class);
-
-            return importArtifact(artifact, recognizer, helper, mimetype, false, upload);
+        if ((artifact == null) || (artifact.toString().length() == 0)) {
+            throw new IllegalArgumentException("The URL to import cannot be null or empty.");
         }
-        catch (IllegalArgumentException iae) {
-            m_log.log(LogService.LOG_INFO, "Error importing artifact: " + iae.getMessage());
-            throw iae;
-        }
-        catch (IOException ioe) {
-            m_log.log(LogService.LOG_INFO, "Error storing artifact: " + ioe.getMessage());
-            throw ioe;
-        }
+        checkURL(artifact);
+        
+        Map<Class<?>, Object> fromArtifact = findRecognizerAndHelper(artifact);
+        ArtifactRecognizer recognizer = (ArtifactRecognizer) fromArtifact.get(ArtifactRecognizer.class);
+        ArtifactHelper helper = (ArtifactHelper) fromArtifact.get(ArtifactHelper.class);
+        String mimetype = (String) fromArtifact.get(String.class);
+        
+        return importArtifact(artifact, recognizer, helper, mimetype, false, upload);
     }
 
     public ArtifactObject importArtifact(URL artifact, String mimetype, boolean upload) throws IllegalArgumentException, IOException {
-        try {
-            if ((artifact == null) || (artifact.toString().length() == 0)) {
-                throw new IllegalArgumentException("The URL to import cannot be null or empty.");
-            }
-            if ((mimetype == null) || (mimetype.length() == 0)) {
-                throw new IllegalArgumentException("The mimetype of the artifact to import cannot be null or empty.");
-            }
-
-            checkURL(artifact);
-
-            Map<Class<?>, Object> fromMimetype = findRecognizerAndHelper(mimetype);
-            ArtifactRecognizer recognizer = (ArtifactRecognizer) fromMimetype.get(ArtifactRecognizer.class);
-            ArtifactHelper helper = (ArtifactHelper) fromMimetype.get(ArtifactHelper.class);
-
-            return importArtifact(artifact, recognizer, helper, mimetype, true, upload);
+        if ((artifact == null) || (artifact.toString().length() == 0)) {
+            throw new IllegalArgumentException("The URL to import cannot be null or empty.");
         }
-        catch (IllegalArgumentException iae) {
-            m_log.log(LogService.LOG_INFO, "Error importing artifact: " + iae.getMessage());
-            throw iae;
+        if ((mimetype == null) || (mimetype.length() == 0)) {
+            throw new IllegalArgumentException("The mimetype of the artifact to import cannot be null or empty.");
         }
-        catch (IOException ioe) {
-            m_log.log(LogService.LOG_INFO, "Error storing artifact: " + ioe.getMessage());
-            throw ioe;
-        }
+        
+        checkURL(artifact);
+        
+        Map<Class<?>, Object> fromMimetype = findRecognizerAndHelper(mimetype);
+        ArtifactRecognizer recognizer = (ArtifactRecognizer) fromMimetype.get(ArtifactRecognizer.class);
+        ArtifactHelper helper = (ArtifactHelper) fromMimetype.get(ArtifactHelper.class);
+        
+        return importArtifact(artifact, recognizer, helper, mimetype, true, upload);
     }
 
     private ArtifactObject importArtifact(URL artifact, ArtifactRecognizer recognizer, ArtifactHelper helper, String mimetype, boolean overwrite, boolean upload) throws IOException {
         ArtifactResource resource = convertToArtifactResource(artifact);
 
         Map<String, String> attributes = recognizer.extractMetaData(resource);
-        Map<String, String> tags = new HashMap<String, String>();
+        Map<String, String> tags = new HashMap<>();
 
         helper.checkAttributes(attributes);
         attributes.put(ArtifactObject.KEY_ARTIFACT_DESCRIPTION, "");
+        attributes.put(ArtifactObject.KEY_SIZE, Long.toString(resource.getSize()));
         if (overwrite) {
             attributes.put(ArtifactObject.KEY_MIMETYPE, mimetype);
         }
@@ -348,14 +330,10 @@ public class ArtifactRepositoryImpl extends ObjectRepositoryImpl<ArtifactObjectI
         attributes.put(ArtifactObject.KEY_URL, artifactURL);
 
         if (upload) {
-            try {
-                String location = upload(artifact, attributes.get("filename"), mimetype);
-                attributes.put(ArtifactObject.KEY_URL, location);
-            }
-            catch (IOException ex) {
-                throw ex;
-            }
+            String location = upload(artifact, attributes.get("filename"), mimetype);
+            attributes.put(ArtifactObject.KEY_URL, location);
         }
+
         ArtifactObject result = create(attributes, tags);
         return result;
     }
@@ -371,10 +349,12 @@ public class ArtifactRepositoryImpl extends ObjectRepositoryImpl<ArtifactObjectI
      */
 
     private void checkURL(URL artifact) throws IllegalArgumentException {
+        URLConnection connection = null;
         // First, check whether we can actually reach something from this URL.
         InputStream is = null;
         try {
-            is = openInputStream(artifact);
+            connection = m_connectionFactory.createConnection(artifact);
+            is = connection.getInputStream();
         }
         catch (IOException ioe) {
             throw new IllegalArgumentException("Artifact " + artifact + " does not point to a valid file.");
@@ -387,6 +367,9 @@ public class ArtifactRepositoryImpl extends ObjectRepositoryImpl<ArtifactObjectI
                 catch (IOException ioe) {
                     // Too bad, nothing to do.
                 }
+            }
+            if (connection instanceof HttpURLConnection) {
+                ((HttpURLConnection) connection).disconnect();
             }
         }
 
@@ -413,60 +396,63 @@ public class ArtifactRepositoryImpl extends ObjectRepositoryImpl<ArtifactObjectI
      *             for any problem uploading the artifact.
      */
     private String upload(URL artifact, String filename, String mimetype) throws IOException {
-        if (m_obrBase == null) {
+        URL obrBase = getObrBase();
+        if (obrBase == null) {
             throw new IOException("There is no storage available for this artifact.");
         }
 
+        URLConnection inputConn = null;
+        URLConnection outputConn = null;
         InputStream input = null;
         OutputStream output = null;
-        URL url = m_obrBase;
+        URL url = obrBase;
         String location = null;
+
+        int blockSize = 8192;
+
         try {
-            input = openInputStream(artifact);
+            inputConn = m_connectionFactory.createConnection(artifact);
+            input = inputConn.getInputStream();
 
-            if(filename != null){
-                url = new URL(m_obrBase,"?filename=" + filename);
-            } 
-            URLConnection connection = m_connectionFactory.createConnection(url);
+            if (filename != null) {
+                url = new URL(obrBase, "?filename=" + filename);
+            }
 
-            connection.setDoOutput(true);
-            connection.setDoInput(true);
-            connection.setUseCaches(false);
-
-            connection.setRequestProperty("Content-Type", mimetype);
-            if (connection instanceof HttpURLConnection) {
+            outputConn = m_connectionFactory.createConnection(url);
+            outputConn.setDoOutput(true);
+            outputConn.setDoInput(true);
+            outputConn.setUseCaches(false);
+            outputConn.setRequestProperty("Content-Type", mimetype);
+            if (outputConn instanceof HttpURLConnection) {
                 // ACE-294: enable streaming mode causing only small amounts of memory to be
                 // used for this commit. Otherwise, the entire input stream is cached into
                 // memory prior to sending it to the server...
-                ((HttpURLConnection) connection).setChunkedStreamingMode(8192);
+                ((HttpURLConnection) outputConn).setChunkedStreamingMode(blockSize);
             }
 
-            output = connection.getOutputStream();
+            output = outputConn.getOutputStream();
 
-            byte[] buffer = new byte[4 * 1024];
+            byte[] buffer = new byte[blockSize];
             for (int count = input.read(buffer); count != -1; count = input.read(buffer)) {
                 output.write(buffer, 0, count);
             }
 
             output.close();
 
-            if (connection instanceof HttpURLConnection) {
-                int responseCode = ((HttpURLConnection) connection).getResponseCode();
+            if (outputConn instanceof HttpURLConnection) {
+                int responseCode = ((HttpURLConnection) outputConn).getResponseCode();
                 switch (responseCode) {
                     case HttpURLConnection.HTTP_CREATED:
-                        location = connection.getHeaderField("Location");
+                        location = outputConn.getHeaderField("Location");
                         break;
                     case HttpURLConnection.HTTP_CONFLICT:
-                        throw new IOException("Artifact already exists in storage.");
+                        throw new ArtifactAlreadyExistsException(artifact, filename);
                     case HttpURLConnection.HTTP_INTERNAL_ERROR:
                         throw new IOException("The storage server returned an internal server error.");
                     default:
                         throw new IOException("The storage server returned code " + responseCode + " writing to " + url.toString());
                 }
             }
-        }
-        catch (IOException ioe) {
-            throw new IOException("Error importing artifact " + artifact.toString() + ": " + ioe.getMessage());
         }
         finally {
             if (input != null) {
@@ -477,6 +463,10 @@ public class ArtifactRepositoryImpl extends ObjectRepositoryImpl<ArtifactObjectI
                     // Not much we can do
                 }
             }
+            if (inputConn instanceof HttpURLConnection) {
+                ((HttpURLConnection) inputConn).disconnect();
+            }
+
             if (output != null) {
                 try {
                     output.close();
@@ -485,13 +475,12 @@ public class ArtifactRepositoryImpl extends ObjectRepositoryImpl<ArtifactObjectI
                     // Not much we can do
                 }
             }
+            if (outputConn instanceof HttpURLConnection) {
+                ((HttpURLConnection) outputConn).disconnect();
+            }
         }
 
         return location;
-    }
-
-    public void setObrBase(URL obrBase) {
-        m_obrBase = obrBase;
     }
 
     public String preprocessArtifact(ArtifactObject artifact, TargetObject target, String targetID, String version) throws IOException {
@@ -500,7 +489,7 @@ public class ArtifactRepositoryImpl extends ObjectRepositoryImpl<ArtifactObjectI
             return artifact.getURL();
         }
         else {
-            return preprocessor.preprocess(artifact.getURL(), new TargetPropertyResolver(target), targetID, version, m_obrBase);
+            return preprocessor.preprocess(artifact.getURL(), new TargetPropertyResolver(target), targetID, version, getObrBase());
         }
     }
 
@@ -512,47 +501,6 @@ public class ArtifactRepositoryImpl extends ObjectRepositoryImpl<ArtifactObjectI
         else {
             return preprocessor.needsNewVersion(artifact.getURL(), new TargetPropertyResolver(target), targetID, fromVersion);
         }
-    }
-
-    public URL getObrBase() {
-        return m_obrBase;
-    }
-
-    /**
-     * Custom comparator which sorts service references by service rank, highest rank first.
-     */
-    private static Comparator<ServiceReference> SERVICE_RANK_COMPARATOR = new Comparator<ServiceReference>() { // TODO
-                                                                                                               // ServiceReferences
-                                                                                                               // are
-                                                                                                               // comparable
-                                                                                                               // by
-                                                                                                               // default
-                                                                                                               // now
-        public int compare(ServiceReference o1, ServiceReference o2) {
-            int rank1 = 0;
-            int rank2 = 0;
-            try {
-                Object rankObject1 = o1.getProperty(Constants.SERVICE_RANKING);
-                rank1 = (rankObject1 == null) ? 0 : ((Integer) rankObject1).intValue();
-            }
-            catch (ClassCastException cce) {
-                // No problem.
-            }
-            try {
-                Object rankObject2 = o2.getProperty(Constants.SERVICE_RANKING);
-                rank1 = (rankObject2 == null) ? 0 : ((Integer) rankObject2).intValue();
-            }
-            catch (ClassCastException cce) {
-                // No problem.
-            }
-
-            return rank1 - rank2;
-        }
-    };
-
-    private InputStream openInputStream(URL artifactURL) throws IOException {
-        URLConnection connection = m_connectionFactory.createConnection(artifactURL);
-        return connection.getInputStream();
     }
 
     /**
@@ -574,6 +522,15 @@ public class ArtifactRepositoryImpl extends ObjectRepositoryImpl<ArtifactObjectI
                 return url;
             }
 
+            @Override
+            public long getSize() throws IOException {
+                // Take care of the fact that an URL could need credentials to be accessible!!!
+                URLConnection conn = m_connectionFactory.createConnection(getURL());
+                conn.setUseCaches(true);
+                return conn.getContentLength();
+            }
+
+            @Override
             public InputStream openStream() throws IOException {
                 // Take care of the fact that an URL could need credentials to be accessible!!!
                 URLConnection conn = m_connectionFactory.createConnection(getURL());

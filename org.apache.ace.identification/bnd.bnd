@@ -1,5 +1,14 @@
+<<<<<<< HEAD
 -buildpath: ${^-buildpath},\
 	osgi.core,\
+=======
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
+-buildpath: \
+	${^-buildpath},\
+	${testng},\
+	osgi.core;version=6.0.0,\
+>>>>>>> refs/remotes/apache/trunk
 	osgi.cmpn,\
 	org.apache.felix.dependencymanager,\
 	org.mockito.mockito-all,\

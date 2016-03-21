@@ -29,34 +29,39 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Properties;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 import org.apache.ace.client.repository.Associatable;
 import org.apache.ace.client.repository.Association;
 import org.apache.ace.client.repository.object.ArtifactObject;
 import org.apache.ace.client.repository.object.DeploymentArtifact;
 import org.apache.ace.client.repository.object.DeploymentVersionObject;
-import org.apache.ace.client.repository.object.TargetObject;
 import org.apache.ace.client.repository.object.Distribution2TargetAssociation;
 import org.apache.ace.client.repository.object.DistributionObject;
+import org.apache.ace.client.repository.object.TargetObject;
 import org.apache.ace.client.repository.stateful.StatefulTargetObject;
-import org.apache.ace.log.AuditEvent;
-import org.apache.ace.log.LogDescriptor;
-import org.apache.ace.log.LogEvent;
+import org.apache.ace.feedback.AuditEvent;
+import org.apache.ace.feedback.Descriptor;
+import org.apache.ace.feedback.Event;
 
 /**
  * A <code>StatefulTargetObjectImpl</code> uses the interface of a <code>StatefulTargetObject</code>,
  * but delegates most of its calls to either an embedded <code>TargetObject</code>, or to its
- * parent <code>StatefulTargetRepository</code>. Once created, it will handle its own lifecycle
+ * parent <code>StatefulTargetRepository</code>. Once created, it will handle its own life cycle
  * and remove itself once is existence is no longer necessary.
  */
 public class StatefulTargetObjectImpl implements StatefulTargetObject {
     private final StatefulTargetRepositoryImpl m_repository;
     private final Object m_lock = new Object();
     private TargetObject m_targetObject;
-    private List<LogDescriptor> m_processedAuditEvents = new ArrayList<LogDescriptor>();
-    private Map<String, String> m_attributes = new HashMap<String, String>();
-    /** This boolean is used to suppress STATUS_CHANGED events during the creation of the object.*/
+    private List<Descriptor> m_processedAuditEvents = new ArrayList<>();
+    private Map<String, String> m_processedTargetProperties;
+    private Map<String, String> m_attributes = new HashMap<>();
+    /** This boolean is used to suppress STATUS_CHANGED events during the creation of the object. */
     private boolean m_inConstructor = true;
+    /** Boolean to ensure we don't recursively enter the determineProvisioningState() method. */
+    private boolean m_determiningProvisioningState = false;
 
     /**
      * Creates a new <code>StatefulTargetObjectImpl</code>. After creation, it will have the
@@ -77,7 +82,7 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
     public String approve() throws IllegalStateException {
         try {
             String version = m_repository.approve(getID());
-            setStoreState(StoreState.Approved);
+            setApprovalState(ApprovalState.Approved);
             return version;
         }
         catch (IOException e) {
@@ -85,7 +90,7 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
         }
     }
 
-    public List<LogEvent> getAuditEvents() {
+    public List<Event> getAuditEvents() {
         return m_repository.getAuditEvents(getID());
     }
 
@@ -104,20 +109,20 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
     }
 
     public boolean isRegistered() {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             return (m_targetObject != null);
         }
     }
 
     public TargetObject getTargetObject() {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             ensureTargetPresent();
             return m_targetObject;
         }
     }
 
     public DeploymentArtifact[] getArtifactsFromDeployment() {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             DeploymentVersionObject mostRecentDeploymentVersion = m_repository.getMostRecentDeploymentVersion(getID());
             if (mostRecentDeploymentVersion != null) {
                 return mostRecentDeploymentVersion.getDeploymentArtifacts();
@@ -131,19 +136,19 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
     }
 
     public boolean getLastInstallSuccess() {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             return Boolean.parseBoolean(getStatusAttribute(KEY_LAST_INSTALL_SUCCESS));
         }
     }
 
     public String getLastInstallVersion() {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             return getStatusAttribute(KEY_LAST_INSTALL_VERSION);
         }
     }
 
     public void acknowledgeInstallVersion(String version) {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             addStatusAttribute(KEY_ACKNOWLEDGED_INSTALL_VERSION, version);
             if (version.equals(getStatusAttribute(KEY_LAST_INSTALL_VERSION))) {
                 setProvisioningState(ProvisioningState.Idle);
@@ -162,6 +167,11 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
     public RegistrationState getRegistrationState() {
         return RegistrationState.valueOf(getStatusAttribute(KEY_REGISTRATION_STATE));
     }
+    
+    public ApprovalState getApprovalState() {
+        String state = getStatusAttribute(KEY_APPROVAL_STATE);
+        return state == null ? ApprovalState.Unapproved : ApprovalState.valueOf(state);
+    }
 
     public StoreState getStoreState() {
         String statusAttribute = getStatusAttribute(KEY_STORE_STATE);
@@ -177,9 +187,10 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
      * reasons for existence.
      */
     void updateTargetObject(boolean needsVerify) {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             m_targetObject = m_repository.getTargetObject(getID());
             determineRegistrationState();
+            determineTargetPropertiesState();
             if (needsVerify) {
                 verifyExistence();
             }
@@ -193,7 +204,7 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
      * reasons for existence.
      */
     void updateAuditEvents(boolean needsVerify) {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             determineProvisioningState();
             if (needsVerify) {
                 verifyExistence();
@@ -206,7 +217,7 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
      * to the targetID this object manages.
      */
     void updateDeploymentVersions(DeploymentVersionObject deploymentVersionObject) {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             determineProvisioningState();
             determineStoreState(deploymentVersionObject);
         }
@@ -225,7 +236,7 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
     }
 
     private void determineRegistrationState() {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             if (!isRegistered()) {
                 setRegistrationState(RegistrationState.Unregistered);
             }
@@ -236,8 +247,8 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
     }
 
     private void determineStoreState(DeploymentVersionObject deploymentVersionObject) {
-        synchronized(m_lock) {
-            List<String> fromShop = new ArrayList<String>();
+        synchronized (m_lock) {
+            SortedSet<String> fromShop = new TreeSet<>();
             ArtifactObject[] artifactsFromShop = m_repository.getNecessaryArtifacts(getID());
             DeploymentVersionObject mostRecentVersion;
             if (deploymentVersionObject == null) {
@@ -260,7 +271,7 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
                 fromShop.add(ao.getURL());
             }
 
-            List<String> fromDeployment = new ArrayList<String>();
+            SortedSet<String> fromDeployment = new TreeSet<>();
             for (DeploymentArtifact da : getArtifactsFromDeployment()) {
                 fromDeployment.add(da.getDirective(DeploymentArtifact.DIRECTIVE_KEY_BASEURL));
             }
@@ -268,8 +279,9 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
             if ((mostRecentVersion == null) && fromShop.isEmpty()) {
                 setStoreState(StoreState.New);
             }
-            else if (fromShop.containsAll(fromDeployment) && fromDeployment.containsAll(fromShop)) {
+            else if (fromShop.equals(fromDeployment)) {
                 // great, we have the same artifacts. But... do they need to be reprocessed?
+                // this might be the case when the target has new tags that affect templates
                 for (ArtifactObject ao : artifactsFromShop) {
                     if (m_repository.needsNewVersion(ao, getID(), mostRecentVersion.getVersion())) {
                         setStoreState(StoreState.Unapproved);
@@ -287,53 +299,78 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
     private void determineProvisioningState() {
         /*
          * This method gets all audit events it has not yet seen, and goes through them, backward
-         * in time, to find either and INSTALL or a COMPLETE event. A INSTALL event gives us a version,
-         * and tells us we're in InProgress. A COMPLETE tells gives us a version, and a success. The success
+         * in time, to find either an INSTALL or a COMPLETE and a TARGETPROPERTIES event.
+         * An INSTALL event gives us a version, and tells us we're in InProgress.
+         * A COMPLETE event tells gives us a version, and a success. The success
          * will be stored, and also sets the state to OK or Failed, unless the version we found has already been
          * acknowledged, the the state is set to Idle. Also, if there is no information whatsoever, we assume Idle.
+         * A TARGETPROPERTIES event will set the target properties accordingly, with the right prefix, overwriting
+         * any old target properties.
          */
-        synchronized(m_lock) {
-            List<LogDescriptor> allDescriptors = m_repository.getAllDescriptors(getID());
-            List<LogDescriptor> newDescriptors = m_repository.diffLogDescriptorLists(allDescriptors, m_processedAuditEvents);
+        synchronized (m_lock) {
+            // make sure we don't recursively execute, which can happen when target properties
+            // are being set or removed (which triggers a notification, which in turn triggers
+            // a call to determineStatus).
+            if (m_determiningProvisioningState) {
+                return;
+            }
+            m_determiningProvisioningState = true;
+            List<Descriptor> allDescriptors = m_repository.getAllDescriptors(getID());
+            List<Descriptor> newDescriptors = m_repository.diffLogDescriptorLists(allDescriptors, m_processedAuditEvents);
 
-            List<LogEvent> newEvents = m_repository.getAuditEvents(newDescriptors);
+            List<Event> newEvents = m_repository.getAuditEvents(newDescriptors);
+            boolean foundDeploymentEvent = false;
+            boolean foundPropertiesEvent = false;
             for (int position = newEvents.size() - 1; position >= 0; position--) {
-                LogEvent event = newEvents.get(position);
+                Event event = newEvents.get(position);
                 
-                // TODO we need to check here if the deployment package is actually the right one
-                
-                String currentVersion = (String) event.getProperties().get(AuditEvent.KEY_VERSION);
-                if (event.getType() == AuditEvent.DEPLOYMENTCONTROL_INSTALL) {
-                    addStatusAttribute(KEY_LAST_INSTALL_VERSION, currentVersion);
-                    setProvisioningState(ProvisioningState.InProgress);
-                    sendNewAuditlog(newDescriptors);
-                    m_processedAuditEvents = allDescriptors;
-                    return;
-                }
-                else if (event.getType() == AuditEvent.DEPLOYMENTADMIN_COMPLETE) {
-                    addStatusAttribute(KEY_LAST_INSTALL_VERSION, currentVersion);
-                    if ((currentVersion != null) && currentVersion.equals(getStatusAttribute(KEY_ACKNOWLEDGED_INSTALL_VERSION))) {
-                        setProvisioningState(ProvisioningState.Idle);
+                if (!foundDeploymentEvent) {
+                    // TODO we need to check here if the deployment package is actually the right one
+                    String currentVersion = (String) event.getProperties().get(AuditEvent.KEY_VERSION);
+                    if (event.getType() == AuditEvent.DEPLOYMENTCONTROL_INSTALL) {
+                        addStatusAttribute(KEY_LAST_INSTALL_VERSION, currentVersion);
+                        setProvisioningState(ProvisioningState.InProgress);
                         sendNewAuditlog(newDescriptors);
                         m_processedAuditEvents = allDescriptors;
-                        return;
+                        foundDeploymentEvent = true;
                     }
-                    else {
-                        String value = (String) event.getProperties().get(AuditEvent.KEY_SUCCESS);
-                        addStatusAttribute(KEY_LAST_INSTALL_SUCCESS, value);
-                        if (Boolean.parseBoolean(value)) {
-                            setProvisioningState(ProvisioningState.OK);
+                    if (event.getType() == AuditEvent.DEPLOYMENTADMIN_COMPLETE) {
+                        addStatusAttribute(KEY_LAST_INSTALL_VERSION, currentVersion);
+                        if ((currentVersion != null) && currentVersion.equals(getStatusAttribute(KEY_ACKNOWLEDGED_INSTALL_VERSION))) {
+                            setProvisioningState(ProvisioningState.Idle);
                             sendNewAuditlog(newDescriptors);
                             m_processedAuditEvents = allDescriptors;
-                            return;
+                            foundDeploymentEvent = true;
                         }
                         else {
-                            setProvisioningState(ProvisioningState.Failed);
-                            sendNewAuditlog(newDescriptors);
-                            m_processedAuditEvents = allDescriptors;
-                            return;
+                            String value = (String) event.getProperties().get(AuditEvent.KEY_SUCCESS);
+                            addStatusAttribute(KEY_LAST_INSTALL_SUCCESS, value);
+                            if (Boolean.parseBoolean(value)) {
+                                setProvisioningState(ProvisioningState.OK);
+                                sendNewAuditlog(newDescriptors);
+                                m_processedAuditEvents = allDescriptors;
+                                foundDeploymentEvent = true;
+                            }
+                            else {
+                                setProvisioningState(ProvisioningState.Failed);
+                                sendNewAuditlog(newDescriptors);
+                                m_processedAuditEvents = allDescriptors;
+                                foundDeploymentEvent = true;
+                            }
                         }
                     }
+                }
+                if (!foundPropertiesEvent) {
+                    if (event.getType() == AuditEvent.TARGETPROPERTIES_SET) {
+                        m_processedTargetProperties = event.getProperties();
+                        foundPropertiesEvent = true;
+                        determineTargetPropertiesState();
+                    }
+                }
+                // as soon as we've found the latest of both types of events, we're done
+                if (foundDeploymentEvent && foundPropertiesEvent) {
+                    m_determiningProvisioningState = false;
+                    return;
                 }
             }
 
@@ -342,13 +379,38 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
             }
             sendNewAuditlog(newDescriptors);
             m_processedAuditEvents = allDescriptors;
+            m_determiningProvisioningState = false;
         }
     }
 
-    private void sendNewAuditlog(List<LogDescriptor> events) {
+    private void determineTargetPropertiesState() {
+        // only process them if the target is already registered
+        if (isRegistered() && m_processedTargetProperties != null) {
+            Map<String, String> tags = m_processedTargetProperties;
+            m_processedTargetProperties = null;
+            // clear "old" tags starting with the prefix
+            Enumeration<String> keys = m_targetObject.getTagKeys();
+            ArrayList<String> keysToDelete = new ArrayList<>();
+            while (keys.hasMoreElements()) {
+                String key = keys.nextElement();
+                if (key.startsWith(TARGETPROPERTIES_PREFIX)) {
+                    keysToDelete.add(key);
+                }
+            }
+            for (String keyToDelete : keysToDelete) {
+                m_targetObject.removeTag(keyToDelete);
+            }
+            // add new tags and prefix them
+            for (String newKey : tags.keySet()) {
+                m_targetObject.addTag(TARGETPROPERTIES_PREFIX + newKey, tags.get(newKey));
+            }
+        }
+    }
+    
+    private void sendNewAuditlog(List<Descriptor> events) {
         // Check whether there are actually events in the list.
         boolean containsData = false;
-        for (LogDescriptor l : events) {
+        for (Descriptor l : events) {
             containsData |= (l.getRangeSet().getHigh() != 0);
         }
 
@@ -370,6 +432,15 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
     private void setProvisioningState(ProvisioningState state) {
         setStatus(KEY_PROVISIONING_STATE, state.toString());
     }
+    
+    private void setApprovalState(ApprovalState state) {
+        setStatus(KEY_APPROVAL_STATE, state.toString());
+        if (isRegistered() && state == ApprovalState.Approved && needsApprove()) {
+            // trigger a change here, because we know the target will change as part of the
+            // pre-commit phase
+            getTargetObject().notifyChanged();
+        }
+    }
 
     private void setStatus(String key, String status) {
         if (!status.equals(getStatusAttribute(key))) {
@@ -383,7 +454,9 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
 
     private void handleStatechangeAutomation() {
         if (getStoreState().equals(StoreState.Unapproved) && isRegistered() && getAutoApprove()) {
-            approve();
+            if (getApprovalState().equals(ApprovalState.Unapproved)) {
+                approve();
+            }
         }
     }
 
@@ -431,10 +504,6 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
         return m_attributes.get(key);
     }
 
-    /* ******************
-     * Delegates to TargetObject
-     */
-
     public String getID() {
         return getStatusAttribute(KEY_ID);
     }
@@ -444,36 +513,50 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
     }
 
     public List<Distribution2TargetAssociation> getAssociationsWith(DistributionObject distribution) {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             ensureTargetPresent();
             return m_targetObject.getAssociationsWith(distribution);
         }
     }
 
     public List<DistributionObject> getDistributions() {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             ensureTargetPresent();
             return m_targetObject.getDistributions();
         }
     }
 
     public String addAttribute(String key, String value) {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             ensureTargetPresent();
             return m_targetObject.addAttribute(key, value);
         }
     }
+    
+    public String removeAttribute(String key) {
+        synchronized (m_lock) {
+            ensureTargetPresent();
+            return m_targetObject.removeAttribute(key);
+        }
+    }
 
     public String addTag(String key, String value) {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             ensureTargetPresent();
             return m_targetObject.addTag(key, value);
+        }
+    }
+    
+    public String removeTag(String key) {
+        synchronized (m_lock) {
+            ensureTargetPresent();
+            return m_targetObject.removeTag(key);
         }
     }
 
     public String getAttribute(String key) {
         // retrieve from both
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             if (Arrays.binarySearch(KEYS_ALL, key) >= 0) {
                 return getStatusAttribute(key);
             }
@@ -483,8 +566,8 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
     }
 
     public Enumeration<String> getAttributeKeys() {
-        synchronized(m_lock) {
-            List<String> statusKeys = new ArrayList<String>();
+        synchronized (m_lock) {
+            List<String> statusKeys = new ArrayList<>();
             for (String s : KEYS_ALL) {
                 statusKeys.add(s);
             }
@@ -492,33 +575,33 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
             if (m_targetObject != null) {
                 attributeKeys = m_targetObject.getAttributeKeys();
             }
-            return new ExtendedEnumeration<String>(attributeKeys, statusKeys, true);
+            return new ExtendedEnumeration<>(attributeKeys, statusKeys, true);
         }
     }
 
     public Dictionary<String, Object> getDictionary() {
         // build our own dictionary
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             return new StatefulTargetObjectDictionary();
         }
     }
 
     public String getTag(String key) {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             ensureTargetPresent();
             return m_targetObject.getTag(key);
         }
     }
 
     public Enumeration<String> getTagKeys() {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             ensureTargetPresent();
             return m_targetObject.getTagKeys();
         }
     }
 
     public boolean getAutoApprove() {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             if (m_targetObject != null) {
                 return m_targetObject.getAutoApprove();
             }
@@ -530,45 +613,43 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
     }
 
     public void setAutoApprove(boolean approve) {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             ensureTargetPresent();
             m_targetObject.setAutoApprove(approve);
         }
     }
 
-    @SuppressWarnings("unchecked")
     public <T extends Associatable> void add(Association association, Class<T> clazz) {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             ensureTargetPresent();
             m_targetObject.add(association, clazz);
         }
     }
 
     public <T extends Associatable> List<T> getAssociations(Class<T> clazz) {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             ensureTargetPresent();
             return m_targetObject.getAssociations(clazz);
         }
     }
 
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings("rawtypes")
     public <T extends Associatable, A extends Association> List<A> getAssociationsWith(Associatable other, Class<T> clazz, Class<A> associationType) {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             ensureTargetPresent();
             return m_targetObject.getAssociationsWith(other, clazz, associationType);
         }
     }
 
     public <T extends Associatable> boolean isAssociated(Object obj, Class<T> clazz) {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             ensureTargetPresent();
             return m_targetObject.isAssociated(obj, clazz);
         }
     }
 
-    @SuppressWarnings("unchecked")
     public <T extends Associatable> void remove(Association association, Class<T> clazz) {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             ensureTargetPresent();
             m_targetObject.remove(association, clazz);
         }
@@ -630,7 +711,7 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
 
         @Override
         public Enumeration<Object> elements() {
-            List<Object> statusVals = new ArrayList<Object>();
+            List<Object> statusVals = new ArrayList<>();
             for (String key : KEYS_ALL) {
                 statusVals.add(getStatusAttribute(key));
             }
@@ -638,7 +719,7 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
             if (m_dict != null) {
                 attributeVals = m_dict.elements();
             }
-            return new ExtendedEnumeration<Object>(attributeVals, statusVals, true);
+            return new ExtendedEnumeration<>(attributeVals, statusVals, true);
         }
 
         @Override
@@ -647,6 +728,10 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
                 if (s.equals(key)) {
                     return getStatusAttribute((String) key);
                 }
+            }
+            // ACE-509 - make sure we've got a proper target object to work on...
+            if (m_targetObject == null) {
+                return null;
             }
             String tag = m_targetObject.getTag((String)key);
             String attr = m_targetObject.getAttribute((String)key);
@@ -669,7 +754,7 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
 
         @Override
         public Enumeration<String> keys() {
-            List<String> statusKeys = new ArrayList<String>();
+            List<String> statusKeys = new ArrayList<>();
             for (String key : KEYS_ALL) {
                 statusKeys.add(key);
             }
@@ -677,7 +762,7 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
             if (m_dict != null) {
                 attributeKeys = m_dict.keys();
             }
-            return new ExtendedEnumeration<String>(attributeKeys, statusKeys, false);
+            return new ExtendedEnumeration<>(attributeKeys, statusKeys, false);
         }
 
         @Override
@@ -707,11 +792,23 @@ public class StatefulTargetObjectImpl implements StatefulTargetObject {
     }
 
     public int getCardinality(Map<String, String> properties) {
-        throw new UnsupportedOperationException("A StatefulTargetObject cannot return a cardinality; use the underlying TargetObject instead.");
+        return Integer.MAX_VALUE;
     }
 
-    @SuppressWarnings("unchecked")
     public Comparator getComparator() {
-        throw new UnsupportedOperationException("A StatefulTargetObject cannot return a comparator; use the underlying TargetObject instead.");
+        return null;
+    }
+    
+    @Override
+    public String toString() {
+    	return "StatefulTargetObjectImpl[" + getStatusAttribute(KEY_ID) + " R: " + getRegistrationState() + " A: " + getApprovalState() + " S: " + getStoreState() + " P: " + getProvisioningState() + "]";
+    }
+
+    public void resetApprovalState() {
+        setApprovalState(ApprovalState.Unapproved);
+    }
+
+    @Override
+    public void notifyChanged() {
     }
 }

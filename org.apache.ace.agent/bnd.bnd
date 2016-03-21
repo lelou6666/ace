@@ -1,30 +1,61 @@
-Bundle-Activator: org.apache.ace.agent.impl.Activator
-Bundle-Version: 1.0.0
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
 
+Bundle-Name: Apache ACE Agent
+Bundle-Description: Implementation of the Apache ACE Agent
+Bundle-Version: 1.0.3
+Bundle-Activator: org.apache.ace.agent.impl.Activator
+
+<<<<<<< HEAD
 -buildpath: ${^-buildpath},\
 	osgi.core,\
 	osgi.cmpn,\
 	org.apache.felix.dependencymanager,\
+=======
+Private-Package: org.apache.ace.range,\
+	org.apache.ace.agent.impl,\
+	org.apache.ace.agent.updater,\
 	org.apache.felix.deploymentadmin,\
-	org.apache.ace.connectionfactory;version=latest,\
-	org.apache.ace.consolelogger;version=latest,\
-	org.apache.ace.log.target;version=latest,\
-	org.apache.ace.log.target.store.impl;version=latest,\
-	org.apache.ace.range.api;version=latest,\
-	org.apache.ace.log.api;version=latest,\
-	org.apache.ace.log.listener;version=latest,\
-	org.apache.ace.discovery.api;version=latest,\
-	org.apache.ace.discovery.property;version=latest,\
-	org.apache.ace.identification.api;version=latest,\
-	org.apache.ace.identification.property;version=latest,\
-	org.apache.ace.deployment.api;version=latest,\
-	org.apache.ace.deployment.deploymentadmin;version=latest,\
-	org.apache.ace.deployment.task.base;version=latest,\
-	org.apache.ace.deployment.task;version=latest,\
-	org.apache.ace.scheduler.impl;version=latest,\
-	commons-codec;version=1.4,\
-	org.apache.ace.scheduler.api;version=latest
+	org.apache.felix.deploymentadmin.spi,\
+	org.osgi.service.event,\
+	org.osgi.service.log,\
+	org.osgi.util.tracker,\
+	org.apache.ace.feedback,\
+	org.apache.ace.feedback.util
 
+# No wildcard import here on purpose. Are you sure the agent must 
+# require an extra external dependency? Probably not...
+Import-Package: !org.apache.felix.dm, *
+
+# This is a minimal set on purpose. Are you really sure the agent must 
+# expose another package? Probably not...
+Export-Package: org.apache.ace.agent,\
+	org.osgi.service.deploymentadmin;-split-package:=merge-last,\
+	org.osgi.service.deploymentadmin.spi;-split-package:=merge-last
+
+mavenGroupId: org.apache.ace
+
+-pom: \
+	groupid=${mavenGroupId},\
+	version=${Bundle-Version}
+
+# Keeping the agent as lean as possible. Remove debug when compiling
+# offline
+#javac.debug:  off
+
+-buildpath: \
+	${^-buildpath},\
+	${testng},\
+	osgi.core;version=4.3,\
+	osgi.cmpn;version=4.3,\
+	org.easymock,\
+	javax.servlet,\
+	org.apache.felix.http.jetty;version='[2.2,3)',\
+>>>>>>> refs/remotes/apache/trunk
+	org.apache.felix.deploymentadmin,\
+	org.apache.ace.range.api;version=latest,\
+	org.apache.ace.feedback.common;version=latest
+
+<<<<<<< HEAD
 #
 # Embedding all required api and implementation packages to ensure that the
 # Management Agent can run in any plain vanilla framework.
@@ -90,3 +121,7 @@ Import-Package:	\
 		
 Bundle-Name: Apache ACE Agent
 Bundle-Description: Implementation of the Apache ACE Agent
+=======
+javac.source: 1.7
+javac.target: 1.7
+>>>>>>> refs/remotes/apache/trunk

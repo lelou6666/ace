@@ -20,56 +20,49 @@ package org.apache.ace.useradmin.ui.vaadin;
 
 import org.apache.ace.useradmin.ui.editor.UserEditor;
 import org.apache.felix.dm.Component;
-import org.apache.felix.dm.DependencyManager;
 import org.osgi.service.useradmin.User;
 
 import com.vaadin.ui.Button;
-import com.vaadin.ui.Window;
 
 public class UserAdminButton extends Button {
+    private final UserAdminWindow m_window;
 
-    private final User m_currentUser;
     private volatile UserEditor m_userUtil;
-    private volatile Component m_window;
-    private volatile ClickListener m_click;
 
-    public UserAdminButton(User currentUser) {
-        m_currentUser = currentUser;
+    public UserAdminButton() {
+        setCaption("Manage Users");
         setEnabled(false);
-    }
 
-    public void init(Component component) {
-        final DependencyManager dm = component.getDependencyManager();
-        setEnabled(true);
-        if (m_userUtil.hasRole(m_currentUser, "editUsers")) {
-            setCaption("Manage Users");
-        }
-        else {
-            setCaption("My Info");
-        }
-        final Window window = new UserAdminWindow(m_currentUser);
-        window.setModal(true);
-        // create a new dependency for the window
-        m_window = dm.createComponent()
-            .setImplementation(window)
-            .add(dm.createServiceDependency()
-                .setService(UserEditor.class)
-                .setRequired(true)
-            );
-        dm.add(m_window);
-        m_click = new ClickListener() {
+        m_window = new UserAdminWindow();
+
+        addListener(new ClickListener() {
             @Override
             public void buttonClick(ClickEvent event) {
-                getWindow().addWindow(window);
+                m_window.open(getWindow());
             }
-        };
-        addListener(m_click);
+        });
     }
 
-    public void destroy(Component component) {
+    @Override
+    public void attach() {
+        User user = (User) getApplication().getUser();
+        if (m_userUtil.hasRole(user, "editUsers")) {
+            setEnabled(true);
+        }
+        else {
+            // no edit user karma, so no use to show this button at all...
+            setVisible(false);
+        }
+
+        super.attach();
+    }
+
+    protected Object[] getComposition() {
+        return new Object[] { this, m_window };
+    }
+
+    protected void stop(Component component) {
         setEnabled(false);
-        component.getDependencyManager().remove(m_window);
-        removeListener(m_click);
         setDescription("This service seems to be unavailable at this moment...");
     }
 }

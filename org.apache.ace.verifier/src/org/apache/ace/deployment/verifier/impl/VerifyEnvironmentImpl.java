@@ -106,6 +106,7 @@ public class VerifyEnvironmentImpl implements VerifierService.VerifyEnvironment 
             return null;
         }
 
+        @SuppressWarnings("unchecked")
         public Dictionary<String, String> getHeaders() {
             return new MapToDictionary(m_manifest);
         }
@@ -225,7 +226,7 @@ public class VerifyEnvironmentImpl implements VerifierService.VerifyEnvironment 
         }
         
         @SuppressWarnings("unused")
-        public void log(final ServiceReference ref, final int level, final String message, final Throwable t) {
+        public void log(final ServiceReference<?> ref, final int level, final String message, final Throwable t) {
             final long time = System.currentTimeMillis();
 
             m_reporter.reportLog(new LogEntry() {
@@ -245,7 +246,7 @@ public class VerifyEnvironmentImpl implements VerifierService.VerifyEnvironment 
                     return message;
                 }
 
-                public ServiceReference getServiceReference() {
+                public ServiceReference<?> getServiceReference() {
                     return ref;
                 }
 
@@ -271,7 +272,7 @@ public class VerifyEnvironmentImpl implements VerifierService.VerifyEnvironment 
 
         m_config = config;
         m_reporter = (reporter == null) ? new DummyReporter() : reporter;
-        m_bundles = new ConcurrentHashMap<Long, VerifierBundleRevision>();
+        m_bundles = new ConcurrentHashMap<>();
         
         m_log = new Logger();
         m_log.setLogger(new FrameworkLogger(m_reporter));

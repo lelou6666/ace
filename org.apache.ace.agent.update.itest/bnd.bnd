@@ -1,0 +1,42 @@
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+#
+# NOTE: This test is stored in a seperate from the main agent itest project because 
+# it updates the agent bundle. This causes problems if other tests try to wire to
+# the the api package after the fact.
+
+-buildpath: \
+	osgi.core;version=6.0.0,\
+	org.apache.ace.agent;version=latest,\
+	org.apache.ace.test;version=latest,\
+	org.apache.felix.dependencymanager,\
+	org.apache.felix.http.jetty;version='[2.2,3)',\
+	javax.servlet,\
+	junit.osgi,\
+	org.mockito.mockito-all
+
+-runfw: org.apache.felix.framework;version='[5,6)'
+-runbundles: \
+	org.apache.ace.agent;version=latest,\
+	org.apache.ace.test;version=latest,\
+	org.apache.felix.dependencymanager,\
+	org.apache.felix.configadmin,\
+	org.apache.felix.http.jetty;version='[2.2,3)',\
+	osgi.cmpn
+-runvm: -ea
+-runee: JavaSE-1.7
+-runsystempackages: sun.reflect
+-runproperties: ${itestrunprops}
+-baseline:
+
+Test-Cases: ${classes;CONCRETE;EXTENDS;org.apache.ace.it.IntegrationTestBase}
+
+Private-Package: org.apache.ace.agent.itest
+
+Import-Package: \
+	org.apache.ace.agent,\
+	!org.osgi.service.component.annotations,\
+	*
+Bundle-Version: 1.0.0
+Bundle-Name: Apache ACE Agent itest
+Bundle-Description: Integration test bundle for the Apache ACE Agent
+Bundle-Category: itest

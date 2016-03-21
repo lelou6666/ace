@@ -26,7 +26,9 @@ import org.apache.ace.client.repository.object.DeploymentArtifact;
 import org.apache.ace.client.repository.object.TargetObject;
 import org.apache.ace.client.repository.object.Distribution2TargetAssociation;
 import org.apache.ace.client.repository.object.DistributionObject;
-import org.apache.ace.log.LogEvent;
+import org.apache.ace.feedback.Event;
+
+import aQute.bnd.annotation.ProviderType;
 
 import aQute.bnd.annotation.ProviderType;
 
@@ -54,10 +56,12 @@ public interface StatefulTargetObject extends RepositoryObject {
     public final static String KEY_REGISTRATION_STATE = "KEY_REGISTRATION_STATE";
     public final static String KEY_STORE_STATE = "KEY_STORE_STATE";
     public final static String KEY_PROVISIONING_STATE = "KEY_PROVISIONING_STATE";
+    public final static String KEY_APPROVAL_STATE = "KEY_APPROVAL_STATE";
     public final static String KEY_LAST_INSTALL_VERSION = "KEY_LAST_INSTALL_VERSION";
     public final static String KEY_LAST_INSTALL_SUCCESS = "KEY_LAST_INSTALL_SUCCESS";
     public final static String KEY_ACKNOWLEDGED_INSTALL_VERSION = "KEY_ACKNOWLEDGED_INSTALL_VERSION";
     public final static String[] KEYS_ALL = new String[] {KEY_ID, KEY_REGISTRATION_STATE, KEY_STORE_STATE, KEY_PROVISIONING_STATE, KEY_LAST_INSTALL_VERSION, KEY_LAST_INSTALL_SUCCESS, KEY_ACKNOWLEDGED_INSTALL_VERSION};
+    public static final String TARGETPROPERTIES_PREFIX = "target.";
 
     /**
      * Represents a current deployment package version which cannot be found, i.e.,
@@ -92,7 +96,7 @@ public interface StatefulTargetObject extends RepositoryObject {
      * Gets the list of AuditLog Events for this target. If no auditlog events
      * can be found, and empty list will be returned. The events are ordered ascending by timestamp.
      */
-    public List<LogEvent> getAuditEvents();
+    public List<Event> getAuditEvents();
 
     /**
      * Registers this target, which for now only exists in the AuditLog, into the
@@ -207,4 +211,11 @@ public interface StatefulTargetObject extends RepositoryObject {
     public enum ProvisioningState {
         Idle, InProgress, OK, Failed;
     }
+    
+    /** Indicates if the user has approved changes for this target or not. */
+    public enum ApprovalState {
+        Unapproved, Approved;
+    }
+
+    public ApprovalState getApprovalState();
 }

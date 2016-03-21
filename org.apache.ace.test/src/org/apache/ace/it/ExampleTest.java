@@ -31,7 +31,11 @@ import aQute.bnd.annotation.ConsumerType;
  * This class serves as a minimal example of our integration tests. Also, if this test fails, something is likely
  * wrong with the environment
  */
+<<<<<<< HEAD
 @ConsumerType
+=======
+@SuppressWarnings("deprecation")
+>>>>>>> refs/remotes/apache/trunk
 public class ExampleTest extends IntegrationTestBase {
 
 //    @Configuration

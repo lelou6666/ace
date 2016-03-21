@@ -1,12 +1,25 @@
-Test-Cases: ${classes;CONCRETE;EXTENDS;org.apache.ace.it.IntegrationTestBase}
-Private-Package: org.apache.ace.useradmin.ui.test
--runvm: -ea
--runfw: org.apache.felix.framework;version='[4.0.3,4.0.3]'
--runbundles: osgi.cmpn,\
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
+-buildpath: \
+	${^-buildpath},\
+	osgi.core;version=6.0.0,\
+	osgi.cmpn,\
+	junit.osgi,\
+	org.mockito.mockito-all,\
+	org.apache.felix.dependencymanager,\
+	org.apache.ace.test;version=latest,\
+	org.apache.ace.useradmin.ui;version=latest,\
+	org.apache.ace.repository.api;version=latest,\
+	org.apache.ace.range.api;version=latest
+
+-runfw: org.apache.felix.framework;version='[5,6)'
+-runbundles: \
+	osgi.cmpn,\
 	com.vaadin,\
 	org.apache.felix.configadmin,\
 	org.apache.felix.dependencymanager,\
 	org.apache.felix.eventadmin,\
+	org.apache.felix.http.servlet-api,\
 	org.apache.felix.http.jetty,\
 	org.apache.felix.log,\
 	org.apache.felix.prefs,\
@@ -20,20 +33,19 @@ Private-Package: org.apache.ace.useradmin.ui.test
 	org.apache.ace.connectionfactory;version=latest,\
 	org.apache.ace.deployment.provider.api;version=latest,\
 	org.apache.ace.discovery.api;version=latest,\
-	org.apache.ace.http.listener;version=latest,\
 	org.apache.ace.log.api;version=latest,\
 	org.apache.ace.log.server.servlet;version=latest,\
 	org.apache.ace.range.api;version=latest,\
 	org.apache.ace.repository.api;version=latest,\
 	org.apache.ace.repository.impl;version=latest,\
-	org.apache.ace.repository.servlet;version=latest,\
+	org.apache.ace.repository.servlets;version=latest,\
 	org.apache.ace.resourceprocessor.useradmin;version=latest,\
 	org.apache.ace.scheduler.impl;version=latest,\
 	org.apache.ace.test;version=latest,\
 	org.apache.ace.useradmin.ui;version=latest,\
 	org.apache.ace.webui.vaadin;version=latest,\
-	org.apache.ace.configurator.useradmin.task;version=latest,\
 	org.apache.ace.authentication.api;version=latest,\
+<<<<<<< HEAD
 	org.apache.ace.log.server.store.api;version=latest
 -buildpath: ${^-buildpath}, osgi.core;version='[4.1,5)',\
 	osgi.cmpn,\
@@ -44,13 +56,20 @@ Private-Package: org.apache.ace.useradmin.ui.test
 	org.apache.ace.useradmin.ui;version=latest,\
 	org.apache.ace.repository.api;version=latest,\
 	org.apache.ace.range.api;version=latest
+=======
+	org.apache.ace.log.server.store.api;version=latest,\
+	org.apache.ace.feedback.common;version=latest
+-runvm: -ea
+-runee: JavaSE-1.7
+>>>>>>> refs/remotes/apache/trunk
 -runsystempackages: sun.reflect
--runproperties: org.apache.felix.log.storeDebug=true,\
-	org.apache.felix.eventadmin.Timeout=0,\
-	org.apache.ace.server.port=8080,\
-	org.osgi.service.http.port=8080,\
-	org.apache.felix.log.maxSize=1000
--runee: JavaSE-1.6
+-runproperties: ${itestrunprops}
+-baseline:
+
+Test-Cases: ${classes;CONCRETE;EXTENDS;org.apache.ace.it.IntegrationTestBase}
+
+Private-Package: org.apache.ace.useradmin.ui.test
+
 Bundle-Version: 1.0.0
 Bundle-Name: Apache ACE UserAdminUI itest
 Bundle-Description: Integration test bundle for Apache ACE UserAdminUI

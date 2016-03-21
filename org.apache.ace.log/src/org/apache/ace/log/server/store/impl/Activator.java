@@ -36,10 +36,11 @@ import org.osgi.service.event.EventAdmin;
 import org.osgi.service.log.LogService;
 
 public class Activator extends DependencyActivatorBase implements ManagedServiceFactory {
+    public static final String PID = "org.apache.ace.log.server.store.filebased";
 
     private static final String LOG_NAME = "name";
     private DependencyManager m_manager;
-    private final Map<String, Component> m_instances = new HashMap<String, Component>();
+    private final Map<String, Component> m_instances = new HashMap<>();
     private BundleContext m_context;
     private volatile LogService m_log;
 
@@ -80,8 +81,7 @@ public class Activator extends DependencyActivatorBase implements ManagedService
         return "Log Store Factory";
     }
 
-    @SuppressWarnings("unchecked")
-    public synchronized void updated(String pid, Dictionary dict) throws ConfigurationException {
+    public synchronized void updated(String pid, Dictionary<String, ?> dict) throws ConfigurationException {
         String name = (String) dict.get(LOG_NAME);
         if ((name == null) || "".equals(name)) {
             throw new ConfigurationException(LOG_NAME, "Log name has to be specified.");
@@ -95,7 +95,8 @@ public class Activator extends DependencyActivatorBase implements ManagedService
             service = m_manager.createComponent()
                 .setInterface(LogStore.class.getName(), props)
                 .setImplementation(new LogStoreImpl(baseDir, name))
-                .add(createServiceDependency().setService(EventAdmin.class).setRequired(false));
+                .add(createServiceDependency().setService(EventAdmin.class).setRequired(false))
+                .add(createConfigurationDependency().setPid(PID));
             m_instances.put(pid, service);
             m_manager.add(service);
         } else {

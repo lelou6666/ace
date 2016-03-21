@@ -51,8 +51,8 @@ public class AssociationImpl<L extends RepositoryObject, R extends RepositoryObj
     /* These lists are volatile, since we use copy-on-write semantics for
      * updating them.
      */
-    private volatile List<L> m_left = new ArrayList<L>();
-    private volatile List<R> m_right = new ArrayList<R>();
+    private volatile List<L> m_left = new ArrayList<>();
+    private volatile List<R> m_right = new ArrayList<>();
     private final Object m_lock = new Object();
 
     private final Filter m_filterLeft;
@@ -138,11 +138,11 @@ public class AssociationImpl<L extends RepositoryObject, R extends RepositoryObj
     }
 
     public List<L> getLeft() {
-        return new ArrayList<L>(m_left);
+        return new ArrayList<>(m_left);
     }
 
     public List<R> getRight() {
-        return new ArrayList<R>(m_right);
+        return new ArrayList<>(m_right);
     }
 
     public void remove() {
@@ -166,44 +166,31 @@ public class AssociationImpl<L extends RepositoryObject, R extends RepositoryObj
      * @param clazz The class of the 'other side' of this association.
      * @return The most suited endpoint; this could be equal to <code>endpoint</code>.
      */
-    @SuppressWarnings("unchecked")
     private <TYPE extends RepositoryObject> List<TYPE> locateEndpoint(ObjectRepositoryImpl<?, TYPE> objectRepositoryImpl, Filter filter, List<TYPE> endpoints, int cardinality, Class<? extends RepositoryObject> clazz, boolean notify) {
-        List<TYPE> candidates = objectRepositoryImpl.get(filter);
-        List<TYPE> newEndpoints = new ArrayList<TYPE>();
-        List<TYPE> oldEndpoints = new ArrayList<TYPE>(endpoints);
 
+        List<TYPE> candidates = objectRepositoryImpl.get(filter);
         if (candidates.size() > cardinality) {
             Comparator<TYPE> comparator = candidates.get(0).getComparator();
             if (comparator != null) {
                 Collections.sort(candidates, comparator);
             }
             else {
-                throw new NullPointerException("Filter '" + filter.toString() + "' has resulted in multiple candidates, so the RepositoryObject descendents should have provide a comparator, which they do not.");
+                throw new NullPointerException("Filter '" + filter.toString() + "' in '" + this + "' has resulted in multiple candidates, so the RepositoryObject descendents should have provide a comparator, which they do not.");
             }
         }
-
+        
+        List<TYPE> oldEndpoints = new ArrayList<>(endpoints);
+        List<TYPE> newEndpoints = new ArrayList<>();
         for (int i = 0; (i < cardinality) && !candidates.isEmpty(); i++) {
             TYPE current = candidates.remove(0);
             newEndpoints.add(current);
-
             if (!oldEndpoints.remove(current)) {
                 current.add(this, clazz);
             }
         }
-
         for (TYPE e : oldEndpoints) {
             e.remove(this, clazz);
         }
-
-        if (!endpoints.equals(newEndpoints)) {
-            Properties props = new Properties();
-            props.put(EVENT_OLD, new ArrayList<TYPE>(endpoints));
-            props.put(EVENT_NEW, new ArrayList<TYPE>(newEndpoints));
-            if (notify) {
-                notifyChanged(props);
-            }
-        }
-
         return newEndpoints;
     }
 
@@ -214,7 +201,20 @@ public class AssociationImpl<L extends RepositoryObject, R extends RepositoryObj
      */
     private void locateLeftEndpoint(boolean notify) {
         synchronized (m_lock) {
-            m_left = locateEndpoint(m_leftRepository, m_filterLeft, m_left, (getAttribute(LEFT_CARDINALITY) == null ? 1 : Integer.parseInt(getAttribute(LEFT_CARDINALITY))), m_rightClass, notify);
+            List<L> newEndpoints = locateEndpoint(m_leftRepository, m_filterLeft, m_left, (getAttribute(LEFT_CARDINALITY) == null ? 1 : Integer.parseInt(getAttribute(LEFT_CARDINALITY))), m_rightClass, notify);
+            if (!newEndpoints.equals(m_left)) {
+                if (notify) {
+                    List<L> oldEndpoints = new ArrayList<>(m_left);
+                    m_left = new ArrayList<>(newEndpoints);
+                    Properties props = new Properties();
+                    props.put(EVENT_OLD, oldEndpoints);
+                    props.put(EVENT_NEW, newEndpoints);
+                    notifyChanged(props);
+                }
+                else {
+                    m_left = newEndpoints;
+                }
+            }
         }
     }
 
@@ -225,7 +225,20 @@ public class AssociationImpl<L extends RepositoryObject, R extends RepositoryObj
      */
     private void locateRightEndpoint(boolean notify) {
         synchronized (m_lock) {
-            m_right = locateEndpoint(m_rightRepository, m_filterRight, m_right, (getAttribute(RIGHT_CARDINALITY) == null ? 1 : Integer.parseInt(getAttribute(RIGHT_CARDINALITY))), m_leftClass, notify);
+            List<R> newEndpoints = locateEndpoint(m_rightRepository, m_filterRight, m_right, (getAttribute(RIGHT_CARDINALITY) == null ? 1 : Integer.parseInt(getAttribute(RIGHT_CARDINALITY))), m_leftClass, notify);
+            if (!newEndpoints.equals(m_right)) {
+                if (notify) {
+                    List<R> oldEndpoints = new ArrayList<>(m_right);
+                    m_right = new ArrayList<>(newEndpoints);
+                    Properties props = new Properties();
+                    props.put(EVENT_OLD, oldEndpoints);
+                    props.put(EVENT_NEW, newEndpoints);
+                    notifyChanged(props);
+                }
+                else {
+                    m_right = newEndpoints;
+                }
+            }
         }
     }
 
@@ -239,10 +252,10 @@ public class AssociationImpl<L extends RepositoryObject, R extends RepositoryObj
         // for now, we chop of the star, and check whether the topic starts with that.
         RepositoryObject entity = (RepositoryObject) event.getProperty(RepositoryObject.EVENT_ENTITY);
         if ((event.getTopic().endsWith("ADDED")) || event.getTopic().endsWith("REMOVED")) {
-            if (m_leftClass.isInstance(entity) && m_filterLeft.match(entity.getDictionary())) {
+            if (m_leftClass.isInstance(entity) && m_filterLeft.matchCase(entity.getDictionary())) {
                 locateLeftEndpoint(true);
             }
-            if (m_rightClass.isInstance(entity) && m_filterRight.match(entity.getDictionary())) {
+            if (m_rightClass.isInstance(entity) && m_filterRight.matchCase(entity.getDictionary())) {
                 locateRightEndpoint(true);
             }
         }

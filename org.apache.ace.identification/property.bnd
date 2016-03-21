@@ -1,6 +1,7 @@
-Private-Package: org.apache.ace.identification.property,\
-	org.apache.ace.identification.property.constants
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
+Private-Package: org.apache.ace.identification.property
 Bundle-Activator: org.apache.ace.identification.property.Activator
-Bundle-Version: 1.0.0
+Bundle-Version: 1.0.3
 Bundle-Name: Apache ACE Identification Property
 Bundle-Description: Registers a service factory for property based Identification services

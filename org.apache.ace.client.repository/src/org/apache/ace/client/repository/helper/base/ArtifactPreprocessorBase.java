@@ -104,15 +104,17 @@ public abstract class ArtifactPreprocessorBase implements ArtifactPreprocessor {
         if (obrBase == null) {
             throw new IOException("There is no storage available for this artifact.");
         }
-        if ((name == null) || (input == null)) {
-            throw new IllegalArgumentException("None of the parameters can be null.");
+        if (name == null) {
+            throw new IllegalArgumentException("Name cannot be null.");
+        }
+        if (input == null) {
+            throw new IllegalArgumentException("Input stream cannot be null.");
         }
 
         OutputStream output = null;
         String location = null;
         try {
-
-            URL url = new URL(obrBase, "?filename=" + name);
+            URL url = new URL(obrBase, "?filename=" + name + "&replace=true");
             URLConnection connection = m_connectionFactory.createConnection(url);
             connection.setDoOutput(true);
             connection.setDoInput(true);
@@ -141,12 +143,11 @@ public abstract class ArtifactPreprocessorBase implements ArtifactPreprocessor {
                         location = connection.getHeaderField("Location");
                         break;
                     case HttpURLConnection.HTTP_CONFLICT:
-                        throw new IOException("Artifact already exists in storage.");
+                        throw new IOException("Artifact already exists in storage: " + name);
                     case HttpURLConnection.HTTP_INTERNAL_ERROR:
-                        throw new IOException("The storage server returned an internal server error.");
+                        throw new IOException("The storage server returned an internal server error while trying to upload " + name);
                     default:
-                        throw new IOException("The storage server returned code " + responseCode + " writing to "
-                            + url.toString());
+                        throw new IOException("The storage server returned code " + responseCode + " writing to " + url.toString());
                 }
             }
         }

@@ -22,8 +22,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+
 import org.apache.felix.framework.util.VersionRange;
 
+@SuppressWarnings("unchecked")
 public class SimpleFilter
 {
     public static final int MATCH_ALL = 0;
@@ -559,7 +561,7 @@ loop:   for (int i = 0; i < len; i++)
         // Rather than building a filter string to be parsed into a SimpleFilter,
         // we will just create the parsed SimpleFilter directly.
 
-        List<SimpleFilter> filters = new ArrayList<SimpleFilter>();
+        List<SimpleFilter> filters = new ArrayList<>();
 
         for (Entry<String, Object> entry : attrs.entrySet())
         {

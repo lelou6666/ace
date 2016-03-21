@@ -29,6 +29,7 @@ import org.apache.ace.connectionfactory.ConnectionFactory;
 import org.apache.felix.dm.DependencyActivatorBase;
 import org.apache.felix.dm.DependencyManager;
 import org.osgi.framework.BundleContext;
+import org.osgi.service.log.LogService;
 
 /**
  * Activator class for the Configuration ArtifactHelper.
@@ -36,8 +37,8 @@ import org.osgi.framework.BundleContext;
 public class Activator extends DependencyActivatorBase {
 
     @Override
-    public synchronized void init(BundleContext context, DependencyManager manager) throws Exception {
-        Dictionary<String, String> props = new Hashtable<String, String>();
+    public void init(BundleContext context, DependencyManager manager) throws Exception {
+        Dictionary<String, String> props = new Hashtable<>();
         props.put(ArtifactObject.KEY_MIMETYPE, ConfigurationHelper.MIMETYPE);
 
         ConfigurationHelperImpl helperImpl = new ConfigurationHelperImpl();
@@ -47,11 +48,14 @@ public class Activator extends DependencyActivatorBase {
             .add(createServiceDependency()
                 .setService(ConnectionFactory.class)
                 .setRequired(true))
+            .add(createServiceDependency()
+                .setService(LogService.class)
+                .setRequired(false))
             );
     }
 
     @Override
-    public synchronized void destroy(BundleContext context, DependencyManager manager) throws Exception {
+    public void destroy(BundleContext context, DependencyManager manager) throws Exception {
         // Nothing to do
     }
 }

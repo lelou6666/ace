@@ -20,9 +20,8 @@ package org.apache.ace.target.management.ui;
 
 import java.util.Map;
 
-import org.apache.ace.client.repository.RepositoryObject;
 import org.apache.ace.client.repository.stateful.StatefulTargetObject;
-import org.apache.ace.webui.NamedObject;
+import org.apache.ace.client.repository.stateful.StatefulTargetObject.ApprovalState;
 import org.apache.ace.webui.UIExtensionFactory;
 
 import com.vaadin.ui.Button;
@@ -39,9 +38,6 @@ public class TargetManagementExtension implements UIExtensionFactory {
 
     private static final String CAPTION = "Management";
 
-    /**
-     * {@inheritDoc}
-     */
     public Component create(Map<String, Object> context) {
         GridLayout result = new GridLayout(1, 4);
         result.setCaption(CAPTION);
@@ -50,13 +46,7 @@ public class TargetManagementExtension implements UIExtensionFactory {
         result.setSpacing(true);
         result.setSizeFull();
 
-        RepositoryObject object = getRepositoryObjectFromContext(context);
-        if (!(object instanceof StatefulTargetObject)) {
-            result.addComponent(new Label("This target is not a stateful gateway object."));
-            return result;
-        }
-
-        final StatefulTargetObject target = (StatefulTargetObject) object;
+        final StatefulTargetObject target = getRepositoryObjectFromContext(context);
 
         final CheckBox registerCB = new CheckBox("Registered?");
         registerCB.setImmediate(true);
@@ -72,10 +62,9 @@ public class TargetManagementExtension implements UIExtensionFactory {
 
         result.addComponent(autoApproveCB);
 
-
         final Button approveButton = new Button("Approve changes");
         approveButton.setImmediate(true);
-        approveButton.setEnabled(target.needsApprove());
+        approveButton.setEnabled(getApproveButtonEnabledState(target));
 
         result.addComponent(approveButton);
         
@@ -96,26 +85,29 @@ public class TargetManagementExtension implements UIExtensionFactory {
         autoApproveCB.addListener(new Button.ClickListener() {
             public void buttonClick(ClickEvent event) {
                 target.setAutoApprove(event.getButton().booleanValue());
-                approveButton.setEnabled(target.needsApprove());
+                approveButton.setEnabled(getApproveButtonEnabledState(target));
             }
         });
         approveButton.addListener(new Button.ClickListener() {
             public void buttonClick(ClickEvent event) {
                 target.approve();
-                approveButton.setEnabled(target.needsApprove());
+                approveButton.setEnabled(getApproveButtonEnabledState(target));
             }
         });
 
         return result;
     }
+    
+    private boolean getApproveButtonEnabledState(StatefulTargetObject target) {
+        return ApprovalState.Unapproved.equals(target.getApprovalState()) && target.needsApprove();
+    }
 
-    private RepositoryObject getRepositoryObjectFromContext(Map<String, Object> context) {
-        Object contextObject = context.get("object");
+    private StatefulTargetObject getRepositoryObjectFromContext(Map<String, Object> context) {
+        Object contextObject = context.get("statefulTarget");
         if (contextObject == null) {
             throw new IllegalStateException("No context object found");
         }
 
-        return (contextObject instanceof NamedObject ? ((NamedObject) contextObject).getObject()
-            : (RepositoryObject) contextObject);
+        return (StatefulTargetObject) contextObject;
     }
 }

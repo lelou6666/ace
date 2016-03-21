@@ -30,15 +30,17 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeMap;
+
 import org.apache.felix.framework.util.SecureAction;
 import org.apache.felix.framework.util.StringComparator;
 import org.apache.felix.framework.wiring.BundleCapabilityImpl;
 import org.osgi.framework.wiring.BundleCapability;
 
+@SuppressWarnings("unchecked")
 public class CapabilitySet
 {
     private final Map<String, Map<Object, Set<BundleCapability>>> m_indices;
-    private final Set<BundleCapability> m_capSet = new HashSet<BundleCapability>();
+    private final Set<BundleCapability> m_capSet = new HashSet<>();
     private final static SecureAction m_secureAction = new SecureAction();
 
 public void dump()
@@ -122,7 +124,7 @@ public void dump()
         Set<BundleCapability> caps = index.get(capValue);
         if (caps == null)
         {
-            caps = new HashSet<BundleCapability>();
+            caps = new HashSet<>();
             index.put(capValue, caps);
         }
         caps.add(cap);
@@ -185,7 +187,7 @@ public void dump()
 
     private Set<BundleCapability> match(Set<BundleCapability> caps, SimpleFilter sf)
     {
-        Set<BundleCapability> matches = new HashSet<BundleCapability>();
+        Set<BundleCapability> matches = new HashSet<>();
 
         if (sf.getOperation() == SimpleFilter.MATCH_ALL)
         {

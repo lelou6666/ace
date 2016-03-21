@@ -19,7 +19,8 @@
 
 package org.apache.ace.connectionfactory.impl;
 
-import java.util.Properties;
+import java.util.Dictionary;
+import java.util.Hashtable;
 
 import org.apache.ace.connectionfactory.ConnectionFactory;
 import org.osgi.framework.BundleActivator;
@@ -36,7 +37,7 @@ public class Activator implements BundleActivator {
      * {@inheritDoc}
      */
     public void start(BundleContext context) throws Exception {
-        Properties props = new Properties();
+        Dictionary<String, Object> props = new Hashtable<>();
         props.put(Constants.SERVICE_PID, ConnectionFactoryImpl.FACTORY_PID);
         props.put("impl.type", "jdk");
 

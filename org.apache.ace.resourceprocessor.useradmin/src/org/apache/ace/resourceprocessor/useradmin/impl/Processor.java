@@ -29,11 +29,10 @@ import org.osgi.service.deploymentadmin.spi.ResourceProcessorException;
 import org.osgi.service.log.LogService;
 
 /**
- * Implementation of the ResourceProcessor. This base class takes care of
- * the interaction with the DeploymentAdmin, while delegating the 'actual' work
- * to a store.
+ * Implementation of the ResourceProcessor. This base class takes care of the interaction with the DeploymentAdmin,
+ * while delegating the 'actual' work to a store.
  */
-public class Processor implements ResourceProcessor{
+public class Processor implements ResourceProcessor {
     private volatile LogService m_log; /* Injected by dependency manager */
 
     private volatile DeploymentSession m_session;
@@ -41,9 +40,9 @@ public class Processor implements ResourceProcessor{
     private List<String> m_toInstall;
     private List<String> m_toRemove;
 
-    private final ResourceStore m_resourceStore;
+    private final UserAdminStore m_resourceStore;
 
-    Processor(ResourceStore store) {
+    Processor(UserAdminStore store) {
         m_resourceStore = store;
     }
 
@@ -55,8 +54,8 @@ public class Processor implements ResourceProcessor{
             throw new IllegalArgumentException("This resource processor is currently processing another deployment session, installing deploymentpackage" + m_session.getTargetDeploymentPackage().getName());
         }
         m_session = session;
-        m_toInstall = new ArrayList<String>();
-        m_toRemove = new ArrayList<String>();
+        m_toInstall = new ArrayList<>();
+        m_toRemove = new ArrayList<>();
 
         String fromSource = session.getSourceDeploymentPackage().getName();
         String fromTarget = session.getTargetDeploymentPackage().getName();
@@ -78,7 +77,7 @@ public class Processor implements ResourceProcessor{
         m_toRemove = null;
     }
 
-    private void ensureSession()  {
+    private void ensureSession() {
         if (m_session == null) {
             throw new IllegalStateException("This resource processor is currently not part of a deployment session.");
         }

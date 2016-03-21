@@ -18,9 +18,17 @@
  */
 package org.apache.ace.client.rest;
 
-import javax.servlet.Servlet;
+import static org.apache.ace.http.HttpConstants.ACE_WHITEBOARD_CONTEXT_SELECT_FILTER;
+import static org.osgi.service.http.whiteboard.HttpWhiteboardConstants.HTTP_WHITEBOARD_CONTEXT_SELECT;
+import static org.osgi.service.http.whiteboard.HttpWhiteboardConstants.HTTP_WHITEBOARD_LISTENER;
+import static org.osgi.service.http.whiteboard.HttpWhiteboardConstants.HTTP_WHITEBOARD_SERVLET_PATTERN;
 
-import org.apache.ace.client.repository.SessionFactory;
+import java.util.Properties;
+
+import javax.servlet.Servlet;
+import javax.servlet.http.HttpSessionListener;
+
+import org.apache.ace.client.workspace.WorkspaceManager;
 import org.apache.felix.dm.DependencyActivatorBase;
 import org.apache.felix.dm.DependencyManager;
 import org.osgi.framework.BundleContext;
@@ -28,28 +36,24 @@ import org.osgi.service.log.LogService;
 
 public class Activator extends DependencyActivatorBase {
     public static final String RESTCLIENT_PID = "org.apache.ace.client.rest";
-    
-    @Override
-    public void init(BundleContext context, DependencyManager manager) throws Exception {
-        manager.add(createComponent()
-            .setInterface(Servlet.class.getName(), null)
-            .setImplementation(RESTClientServlet.class)
-            .add(createServiceDependency()
-                .setService(SessionFactory.class)
-                .setRequired(true)
-            )
-            .add(createConfigurationDependency()
-                .setPropagate(true)
-                .setPid(RESTCLIENT_PID)
-            )
-            .add(createServiceDependency()
-                .setService(LogService.class)
-                .setRequired(false)
-            )
-        );
-    }
 
     @Override
-    public void destroy(BundleContext context, DependencyManager manager) throws Exception {
+    public void init(BundleContext context, DependencyManager manager) throws Exception {
+        Properties props = new Properties();
+        props.put(HTTP_WHITEBOARD_SERVLET_PATTERN, "/client/*");
+        props.put(HTTP_WHITEBOARD_CONTEXT_SELECT, ACE_WHITEBOARD_CONTEXT_SELECT_FILTER);
+        props.put(HTTP_WHITEBOARD_LISTENER, true);
+
+        manager.add(createComponent()
+            .setInterface(new String[] { Servlet.class.getName(), HttpSessionListener.class.getName() }, props)
+            .setImplementation(RESTClientServlet.class)
+            .add(createServiceDependency()
+                .setService(WorkspaceManager.class)
+                .setRequired(true))
+            .add(createConfigurationDependency()
+                .setPid(RESTCLIENT_PID))
+            .add(createServiceDependency()
+                .setService(LogService.class)
+                .setRequired(false)));
     }
 }

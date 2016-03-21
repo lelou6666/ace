@@ -40,7 +40,7 @@ public class MockBundleStore implements BundleStore {
         return m_outFile;
     }
 
-    public String put(InputStream data, String fileName) throws IOException {
+    public String put(InputStream data, String fileName, boolean replace) throws IOException {
         if (fileName.equals("NewFile")) {
             return "NewFile";
         }
@@ -60,8 +60,7 @@ public class MockBundleStore implements BundleStore {
         return false;
     }
 
-    @SuppressWarnings("unchecked")
-    public void updated(Dictionary arg0) throws ConfigurationException {
-        // TODO does nothing yet
+    public void updated(Dictionary<String, ?> dict) throws ConfigurationException {
+        // Nop
     }
 }

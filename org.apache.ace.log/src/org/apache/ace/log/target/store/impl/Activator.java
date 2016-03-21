@@ -41,7 +41,7 @@ public class Activator extends DependencyActivatorBase implements ManagedService
 
     private DependencyManager m_manager;
     private BundleContext m_context;
-    private final Map /*<String, Component>*/ m_instances = new HashMap();
+    private final Map<String, Component> m_instances = new HashMap<>();
     private volatile LogService m_log;
 
     public void init(BundleContext context, DependencyManager manager) throws Exception {
@@ -88,7 +88,7 @@ public class Activator extends DependencyActivatorBase implements ManagedService
         root.delete();
     }
 
-    public void updated(String pid, Dictionary dict) throws ConfigurationException {
+    public void updated(String pid, Dictionary<String, ?> dict) throws ConfigurationException {
         String ma = (String) dict.get(MA_NAME);
         String name = (String) dict.get(LOG_NAME);
         if ((name == null) || "".equals(name)) {

@@ -18,11 +18,9 @@
  */
 package org.apache.ace.identification.property;
 
-import static org.apache.ace.test.utils.TestUtils.UNIT;
+import java.util.Hashtable;
 
-import java.util.Properties;
-
-import org.apache.ace.identification.property.constants.IdentificationConstants;
+import org.apache.ace.identification.IdentificationConstants;
 import org.apache.ace.test.utils.TestUtils;
 import org.osgi.service.log.LogService;
 import org.testng.annotations.BeforeTest;
@@ -45,10 +43,10 @@ public class SimpleIdentificationTest {
      * @throws Exception
      */
     @SuppressWarnings("serial")
-    @Test(groups = { UNIT })
+    @Test
     public void testSimpleIdentification() throws Exception {
         m_identification.updated(
-            new Properties() {
+            new Hashtable<String, Object>() {
                 {put(IdentificationConstants.IDENTIFICATION_TARGETID_KEY, TEST_ID);}
             });
         assert TEST_ID.equals(m_identification.getID()) : "target ID does not match configured target ID";

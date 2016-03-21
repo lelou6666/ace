@@ -26,7 +26,9 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.jar.Attributes;
@@ -39,6 +41,7 @@ import org.apache.ace.client.repository.RepositoryObject.WorkingState;
 import org.apache.ace.client.repository.helper.bundle.BundleHelper;
 import org.apache.ace.client.repository.object.Artifact2FeatureAssociation;
 import org.apache.ace.client.repository.object.ArtifactObject;
+import org.apache.ace.client.repository.object.DeploymentVersionObject;
 import org.apache.ace.client.repository.object.Distribution2TargetAssociation;
 import org.apache.ace.client.repository.object.DistributionObject;
 import org.apache.ace.client.repository.object.Feature2DistributionAssociation;
@@ -47,6 +50,7 @@ import org.apache.ace.client.repository.object.TargetObject;
 import org.apache.ace.client.repository.stateful.StatefulTargetObject;
 import org.osgi.framework.Constants;
 import org.osgi.framework.InvalidSyntaxException;
+import org.osgi.service.event.Event;
 import org.osgi.service.useradmin.User;
 
 public class RepositoryAdminTest extends BaseRepositoryAdminTest {
@@ -54,10 +58,10 @@ public class RepositoryAdminTest extends BaseRepositoryAdminTest {
     public void testAssociationsWithMovingEndpoints() throws Exception {
         final ArtifactObject b1 = createBasicBundleObject("thebundle", "1", null);
         final FeatureObject g1 = createBasicFeatureObject("thefeature");
-        
+
         final Artifact2FeatureAssociation bg = runAndWaitForEvent(new Callable<Artifact2FeatureAssociation>() {
             public Artifact2FeatureAssociation call() throws Exception {
-                Map<String, String> properties = new HashMap<String, String>();
+                Map<String, String> properties = new HashMap<>();
                 properties.put(BundleHelper.KEY_ASSOCIATION_VERSIONSTATEMENT, "[1,3)");
                 return m_artifact2featureRepository.create(b1, properties, g1, null);
             }
@@ -135,8 +139,6 @@ public class RepositoryAdminTest extends BaseRepositoryAdminTest {
     public void testAutoApprove() throws Exception {
         User user = new MockUser();
 
-        startRepositoryService();
-
         addRepository("storeInstance", "apache", "store", true);
         addRepository("targetInstance", "apache", "target", true);
         addRepository("deploymentInstance", "apache", "deployment", true);
@@ -152,6 +154,8 @@ public class RepositoryAdminTest extends BaseRepositoryAdminTest {
 
         m_repositoryAdmin.login(loginContext);
 
+        m_repositoryAdmin.checkout();
+
         runAndWaitForEvent(new Callable<Object>() {
             public Object call() throws Exception {
                 createBasicTargetObject("testAutoApproveTarget");
@@ -159,9 +163,8 @@ public class RepositoryAdminTest extends BaseRepositoryAdminTest {
             }
         }, false, TargetObject.TOPIC_ADDED, TOPIC_ADDED);
 
-        final StatefulTargetObject sgo =
-            m_statefulTargetRepository.get(
-                m_bundleContext.createFilter("(" + TargetObject.KEY_ID + "=" + "testAutoApproveTarget)")).get(0);
+        final StatefulTargetObject sgo = m_statefulTargetRepository.get(
+            m_bundleContext.createFilter("(" + TargetObject.KEY_ID + "=" + "testAutoApproveTarget)")).get(0);
 
         // Set up some deployment information for the target.
         final FeatureObject g = runAndWaitForEvent(new Callable<FeatureObject>() {
@@ -184,14 +187,18 @@ public class RepositoryAdminTest extends BaseRepositoryAdminTest {
 
         assertTrue("Turning on the autoapprove should not automatically approve whatever was waiting.", sgo.needsApprove());
 
-        runAndWaitForEvent(new Callable<Object>() {
-            public Object call() throws Exception {
-                sgo.approve();
+        sgo.approve();
+
+        List<Event> events = new ArrayList<>();
+        runAndWaitForEvent(new Callable<Void>() {
+            public Void call() throws Exception {
+                m_repositoryAdmin.commit();
                 return null;
             }
-        }, false, TOPIC_STATUS_CHANGED);
+        }, false, events, DeploymentVersionObject.TOPIC_ADDED, TOPIC_STATUS_CHANGED, RepositoryAdmin.TOPIC_REFRESH);
 
         assertFalse("We approved the new version by hand, so we should not need approval.", sgo.needsApprove());
+        assertContainsRefreshCause(events, "commit");
 
         runAndWaitForEvent(new Callable<Object>() {
             public Object call() throws Exception {
@@ -201,6 +208,13 @@ public class RepositoryAdminTest extends BaseRepositoryAdminTest {
             }
         }, false, ArtifactObject.TOPIC_ADDED, Artifact2FeatureAssociation.TOPIC_ADDED, TOPIC_STATUS_CHANGED,
             TOPIC_STATUS_CHANGED);
+
+        runAndWaitForEvent(new Callable<Void>() {
+            public Void call() throws Exception {
+                m_repositoryAdmin.commit();
+                return null;
+            }
+        }, false, DeploymentVersionObject.TOPIC_ADDED, TOPIC_STATUS_CHANGED);
 
         assertFalse("With autoapprove on, adding new deployment information should still not need approval (at least, after the two CHANGED events).", sgo.needsApprove());
 
@@ -241,7 +255,7 @@ public class RepositoryAdminTest extends BaseRepositoryAdminTest {
         }
 
         // Use a valid JAR file, with a Bundle-SymbolicName header, but do not supply an OBR.
-        attributes.putValue(BundleHelper.KEY_SYMBOLICNAME, "org.apache.ace.test" + System.currentTimeMillis());
+        attributes.putValue(BundleHelper.KEY_SYMBOLICNAME, String.format("org.apache.ace.test-%d; singleton:=true", System.currentTimeMillis()));
 
         temp = File.createTempFile("org.apache.ace.test2", ".jar");
         temp.deleteOnExit();
@@ -258,7 +272,6 @@ public class RepositoryAdminTest extends BaseRepositoryAdminTest {
 
         // Supply the OBR.
         addObr("/obr", "store");
-        m_artifactRepository.setObrBase(new URL(HOST + "/obr/"));
 
         m_artifactRepository.importArtifact(temp.toURI().toURL(), true);
 
@@ -278,8 +291,6 @@ public class RepositoryAdminTest extends BaseRepositoryAdminTest {
 
         assertTrue(m_artifactRepository.get().size() == 1);
         assertTrue(m_artifactRepository.getResourceProcessors().size() == 1);
-
-        deleteObr("/obr");
     }
 
     public void testImportArtifactInvalidURL() throws Exception {
@@ -308,8 +319,6 @@ public class RepositoryAdminTest extends BaseRepositoryAdminTest {
         InvalidSyntaxException {
         User user1 = new MockUser();
 
-        startRepositoryService();
-
         addRepository("storeInstance", "apache", "store", true);
         addRepository("targetInstance", "apache", "target", true);
 
@@ -333,13 +342,11 @@ public class RepositoryAdminTest extends BaseRepositoryAdminTest {
     }
 
     /**
-     * Tests read only repository access: marking a repository as readonly for a login should
-     * mean that it does not get committed, but local changes will stay around between logins.
+     * Tests read only repository access: marking a repository as readonly for a login should mean that it does not get
+     * committed, but local changes will stay around between logins.
      */
     public void testReadOnlyRepositoryAccess() throws Exception {
         User user1 = new MockUser();
-
-        startRepositoryService();
 
         addRepository("storeInstance", "apache", "store", true);
         addRepository("targetInstance", "apache", "target", true);
@@ -429,16 +436,13 @@ public class RepositoryAdminTest extends BaseRepositoryAdminTest {
     }
 
     /**
-     * Tests the behavior with logging in and out (with multiple users), and communication
-     * with the server.
+     * Tests the behavior with logging in and out (with multiple users), and communication with the server.
      * 
      * @throws Exception
      */
     public void testRepositoryAdmin() throws Exception {
         final User user1 = new MockUser();
         final User user2 = new MockUser();
-
-        startRepositoryService();
 
         addRepository("storeInstance", "apache", "store", true);
         addRepository("targetInstance", "apache", "target", true);
@@ -471,15 +475,17 @@ public class RepositoryAdminTest extends BaseRepositoryAdminTest {
             // expected
         }
 
+        List<Event> events = new ArrayList<>();
         runAndWaitForEvent(new Callable<Object>() {
             public Object call() throws Exception {
                 m_repositoryAdmin.checkout();
                 return null;
             }
-        }, false, RepositoryAdmin.TOPIC_REFRESH);
+        }, false, events, RepositoryAdmin.TOPIC_REFRESH);
 
         assertTrue("After initial checkout, the repository is current.", m_repositoryAdmin.isCurrent());
         assertFalse("Immediately after login, the repository cannot be modified.", m_repositoryAdmin.isModified());
+        assertContainsRefreshCause(events, "checkout");
 
         ArtifactObject b1 = runAndWaitForEvent(new Callable<ArtifactObject>() {
             public ArtifactObject call() throws Exception {
@@ -609,13 +615,26 @@ public class RepositoryAdminTest extends BaseRepositoryAdminTest {
 
         assertEquals("We expect 2 items in the bundle repository;", 2, m_artifactRepository.get().size());
 
+        events.clear();
         runAndWaitForEvent(new Callable<Object>() {
             public Object call() throws Exception {
                 m_repositoryAdmin.revert();
                 return null;
             }
-        }, false, RepositoryAdmin.TOPIC_REFRESH, RepositoryAdmin.TOPIC_STATUSCHANGED);
+        }, false, events, RepositoryAdmin.TOPIC_STATUSCHANGED, RepositoryAdmin.TOPIC_REFRESH);
 
         assertEquals("We expect 1 item in the bundle repository;", 1, m_artifactRepository.get().size());
+        assertContainsRefreshCause(events, "revert");
+    }
+
+    private void assertContainsRefreshCause(List<Event> events, String cause) {
+        boolean found = false;
+        for (Event event : events) {
+            if (RepositoryAdmin.TOPIC_REFRESH.equals(event.getTopic())) {
+                assertEquals("Refresh property does not have the correct cause property?!", event.getProperty("cause"), cause);
+                found = true;
+            }
+        }
+        assertTrue("Events did not contain expected refresh event!", found);
     }
 }

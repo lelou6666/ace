@@ -32,39 +32,44 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.apache.ace.client.repository.PreCommitMember;
 import org.apache.ace.client.repository.RepositoryAdmin;
 import org.apache.ace.client.repository.RepositoryObject;
 import org.apache.ace.client.repository.RepositoryUtil;
 import org.apache.ace.client.repository.SessionFactory;
 import org.apache.ace.client.repository.helper.bundle.BundleHelper;
+import org.apache.ace.client.repository.object.Artifact2FeatureAssociation;
 import org.apache.ace.client.repository.object.ArtifactObject;
 import org.apache.ace.client.repository.object.DeploymentArtifact;
 import org.apache.ace.client.repository.object.DeploymentVersionObject;
+import org.apache.ace.client.repository.object.Distribution2TargetAssociation;
+import org.apache.ace.client.repository.object.Feature2DistributionAssociation;
 import org.apache.ace.client.repository.object.TargetObject;
 import org.apache.ace.client.repository.object.FeatureObject;
 import org.apache.ace.client.repository.object.DistributionObject;
 import org.apache.ace.client.repository.repository.ArtifactRepository;
 import org.apache.ace.client.repository.repository.DeploymentVersionRepository;
+import org.apache.ace.client.repository.repository.RepositoryConfiguration;
 import org.apache.ace.client.repository.repository.TargetRepository;
 import org.apache.ace.client.repository.stateful.StatefulTargetObject;
+import org.apache.ace.client.repository.stateful.StatefulTargetObject.ApprovalState;
 import org.apache.ace.client.repository.stateful.StatefulTargetRepository;
-import org.apache.ace.log.LogDescriptor;
-import org.apache.ace.log.LogEvent;
+import org.apache.ace.feedback.Descriptor;
+import org.apache.ace.feedback.Event;
 import org.apache.ace.log.server.store.LogStore;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.Filter;
 import org.osgi.framework.InvalidSyntaxException;
 import org.osgi.framework.Version;
-import org.osgi.service.event.Event;
 import org.osgi.service.event.EventAdmin;
 import org.osgi.service.event.EventHandler;
 import org.osgi.service.log.LogService;
 
 /**
- * Implements the StatefulTargetRepository. If an <code>AuditLogStore</code> is present,
- * it will be used; it is assumed that the auditlog store is up to date.
+ * Implements the StatefulTargetRepository. If an <code>AuditLogStore</code> is present, it will be used; it is assumed
+ * that the auditlog store is up to date.
  */
-public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, EventHandler {
+public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, EventHandler, PreCommitMember {
     private BundleContext m_context; /* Injected by dependency manager */
     private ArtifactRepository m_artifactRepository; /* Injected by dependency manager */
     private TargetRepository m_targetRepository; /* Injected by dependency manager */
@@ -74,12 +79,16 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
     private LogService m_log; /* Injected by dependency manager */
     private BundleHelper m_bundleHelper; /* Injected by dependency manager */
     // TODO: Make the concurrencyLevel of this concurrent hashmap settable?
-    private Map<String, StatefulTargetObjectImpl> m_repository = new ConcurrentHashMap<String, StatefulTargetObjectImpl>();
-    private Map<String, StatefulTargetObjectImpl> m_index = new ConcurrentHashMap<String, StatefulTargetObjectImpl>();
-    private final String m_sessionID;
+    private Map<String, StatefulTargetObjectImpl> m_repository = new ConcurrentHashMap<>();
+    private Map<String, StatefulTargetObjectImpl> m_index = new ConcurrentHashMap<>();
 
-    public StatefulTargetRepositoryImpl(String sessionID) {
+    private final String m_sessionID;
+    private final RepositoryConfiguration m_repoConfig;
+    private boolean m_holdEvents = false;
+
+    public StatefulTargetRepositoryImpl(String sessionID, RepositoryConfiguration repoConfig) {
         m_sessionID = sessionID;
+        m_repoConfig = repoConfig;
     }
 
     public StatefulTargetObject create(Map<String, String> attributes, Map<String, String> tags)
@@ -89,7 +98,7 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
 
     public List<StatefulTargetObject> get() {
         synchronized (m_repository) {
-            List<StatefulTargetObject> result = new ArrayList<StatefulTargetObject>();
+            List<StatefulTargetObject> result = new ArrayList<>();
             for (StatefulTargetObjectImpl sgoi : m_repository.values()) {
                 result.add(sgoi);
             }
@@ -99,9 +108,9 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
 
     public List<StatefulTargetObject> get(Filter filter) {
         synchronized (m_repository) {
-            List<StatefulTargetObject> result = new ArrayList<StatefulTargetObject>();
+            List<StatefulTargetObject> result = new ArrayList<>();
             for (StatefulTargetObject entry : m_repository.values()) {
-                if (filter.match(entry.getDictionary())) {
+                if (filter.matchCase(entry.getDictionary())) {
                     result.add(entry);
                 }
             }
@@ -116,7 +125,9 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
     public void remove(StatefulTargetObject entity) {
         synchronized (m_repository) {
             StatefulTargetObjectImpl statefulTarget = (StatefulTargetObjectImpl) entity;
-            unregister(statefulTarget.getID());
+            if (statefulTarget.isRegistered()) {
+                unregister(statefulTarget.getID());
+            }
             removeStateful(statefulTarget);
             // Ensure the external side sees the changes we've made...
             statefulTarget.updateTargetObject(false);
@@ -150,12 +161,13 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
     /**
      * Gets the <code>TargetObject</code> which is identified by the <code>targetID</code>.
      * 
-     * @param targetID A string representing a target ID.
-     * @return The <code>TargetObject</code> from the <code>TargetRepository</code> which has the given
-     *         ID, or <code>null</code> if none can be found.
+     * @param targetID
+     *            A string representing a target ID.
+     * @return The <code>TargetObject</code> from the <code>TargetRepository</code> which has the given ID, or
+     *         <code>null</code> if none can be found.
      */
     TargetObject getTargetObject(String targetID) {
-// synchronized(m_repository) {
+        // synchronized(m_repository) {
         try {
             List<TargetObject> targets =
                 m_targetRepository.get(m_context.createFilter("(" + TargetObject.KEY_ID + "="
@@ -171,15 +183,16 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
             // The filter syntax is illegal, probably a bad target ID.
             return null;
         }
-// }
+        // }
     }
 
     /**
      * Gets the stateful representation of the given target ID.
      * 
-     * @param targetID A string representing a target ID.
-     * @return The <code>StatefulTargetyObjectImpl</code> which handles the given ID,
-     *         or <code>null</code> if none can be found.
+     * @param targetID
+     *            A string representing a target ID.
+     * @return The <code>StatefulTargetyObjectImpl</code> which handles the given ID, or <code>null</code> if none can
+     *         be found.
      */
     StatefulTargetObjectImpl getStatefulTargetObject(String targetID) {
         synchronized (m_repository) {
@@ -190,7 +203,8 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
     /**
      * Creates and registers a new stateful target object based on the given ID.
      * 
-     * @param targetID A string representing a target ID.
+     * @param targetID
+     *            A string representing a target ID.
      * @return The newly created and registered <code>StatefulTargetObjectImpl</code>.
      */
     private StatefulTargetObjectImpl createStateful(String targetID) {
@@ -206,25 +220,26 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
     }
 
     /**
-     * Removes the given entity from this object's repository, and notifies
-     * interested parties of this.
+     * Removes the given entity from this object's repository, and notifies interested parties of this.
      * 
-     * @param entity The StatefulTargetObjectImpl to be removed.
+     * @param entity
+     *            The StatefulTargetObjectImpl to be removed.
      */
     void removeStateful(StatefulTargetObjectImpl entity) {
         synchronized (m_repository) {
             m_repository.remove(entity.getID());
+            m_index.remove(entity.getDefinition());
             notifyChanged(entity, StatefulTargetObject.TOPIC_REMOVED);
         }
     }
 
     /**
-     * Adds the given stateful object to this object's repository, and notifies
-     * interested parties of this change.
+     * Adds the given stateful object to this object's repository, and notifies interested parties of this change.
      * 
-     * @param stoi A <code>StatefulTargetObjectImpl</code> to be registered.
-     * @return <code>true</code> when this object has been added to the repository
-     *         and listeners have been notified, <code>false</code> otherwise.
+     * @param stoi
+     *            A <code>StatefulTargetObjectImpl</code> to be registered.
+     * @return <code>true</code> when this object has been added to the repository and listeners have been notified,
+     *         <code>false</code> otherwise.
      */
     boolean add(StatefulTargetObjectImpl stoi) {
         if (!m_repository.containsKey(stoi)) {
@@ -236,29 +251,31 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
         return false;
     }
 
-    private Comparator<LogEvent> m_auditEventComparator = new LogEventComparator();
+    private Comparator<Event> m_auditEventComparator = new LogEventComparator();
 
     /**
      * Gets all auditlog events which are related to a given target ID.
      * 
-     * @param targetID A string representing a target ID.
-     * @return a list of <code>AuditEvent</code>s related to this target ID,
-     *         ordered in the order they happened. If no events can be found, and empty list will be returned.
+     * @param targetID
+     *            A string representing a target ID.
+     * @return a list of <code>AuditEvent</code>s related to this target ID, ordered in the order they happened. If no
+     *         events can be found, and empty list will be returned.
      */
-    List<LogEvent> getAuditEvents(String targetID) {
+    List<Event> getAuditEvents(String targetID) {
         return getAuditEvents(getAllDescriptors(targetID));
     }
 
     /**
      * Gets all auditlog descriptors which are related to a given target.
      * 
-     * @param targetID The target ID
+     * @param targetID
+     *            The target ID
      * @return A list of LogDescriptors, in no particular order.
      */
-    List<LogDescriptor> getAllDescriptors(String targetID) {
-        List<LogDescriptor> result = new ArrayList<LogDescriptor>();
+    List<Descriptor> getAllDescriptors(String targetID) {
+        List<Descriptor> result = new ArrayList<>();
         try {
-            List<LogDescriptor> descriptors = m_auditLogStore.getDescriptors(targetID);
+            List<Descriptor> descriptors = m_auditLogStore.getDescriptors(targetID);
             if (descriptors != null) {
                 result = descriptors;
             }
@@ -273,17 +290,18 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
     /**
      * Gets all audit log events for a target is has not yet 'seen'.
      * 
-     * @param all A list of all <code>LogDescriptor</code> from which to filter
-     *        the new ones.
-     * @param seen A list of <code>LogDescriptor</code> objects, which indicate
-     *        the items the target has already processed.
-     * @return All AuditLog events that are in the audit store, but are not identified
-     *         by <code>oldDescriptors</code>, ordered by 'happened-before'.
+     * @param all
+     *            A list of all <code>LogDescriptor</code> from which to filter the new ones.
+     * @param seen
+     *            A list of <code>LogDescriptor</code> objects, which indicate the items the target has already
+     *            processed.
+     * @return All AuditLog events that are in the audit store, but are not identified by <code>oldDescriptors</code>,
+     *         ordered by 'happened-before'.
      */
-    List<LogEvent> getAuditEvents(List<LogDescriptor> events) {
+    List<Event> getAuditEvents(List<Descriptor> events) {
         // Get all events from the audit log store, if possible.
-        List<LogEvent> result = new ArrayList<LogEvent>();
-        for (LogDescriptor l : events) {
+        List<Event> result = new ArrayList<>();
+        for (Descriptor l : events) {
             try {
                 result.addAll(m_auditLogStore.get(l));
             }
@@ -297,15 +315,15 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
         return result;
     }
 
-    List<LogDescriptor> diffLogDescriptorLists(List<LogDescriptor> all, List<LogDescriptor> seen) {
-        List<LogDescriptor> descriptors = new ArrayList<LogDescriptor>();
+    List<Descriptor> diffLogDescriptorLists(List<Descriptor> all, List<Descriptor> seen) {
+        List<Descriptor> descriptors = new ArrayList<>();
 
         // Find out what events should be returned
-        for (LogDescriptor s : all) {
-            LogDescriptor diffs = s;
-            for (LogDescriptor d : seen) {
-                if ((s.getLogID() == d.getLogID()) && (s.getTargetID().equals(d.getTargetID()))) {
-                    diffs = new LogDescriptor(s.getTargetID(), s.getLogID(), d.getRangeSet().diffDest(s.getRangeSet()));
+        for (Descriptor s : all) {
+            Descriptor diffs = s;
+            for (Descriptor d : seen) {
+                if ((s.getStoreID() == d.getStoreID()) && (s.getTargetID().equals(d.getTargetID()))) {
+                    diffs = new Descriptor(s.getTargetID(), s.getStoreID(), d.getRangeSet().diffDest(s.getRangeSet()));
                 }
             }
             descriptors.add(diffs);
@@ -321,18 +339,17 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
     }
 
     /**
-     * Based on the information in this stateful object, creates a <code>TargetObject</code>
-     * in the <code>TargetRepository</code>.
-     * This function is intended to be used for targets which are not yet represented
-     * in the <code>TargetRepository</code>; if they already are, an <code>IllegalArgumentException</code>
-     * will be thrown.
+     * Based on the information in this stateful object, creates a <code>TargetObject</code> in the
+     * <code>TargetRepository</code>. This function is intended to be used for targets which are not yet represented in
+     * the <code>TargetRepository</code>; if they already are, an <code>IllegalArgumentException</code> will be thrown.
      * 
-     * @param targetID A string representing the ID of the new target.
+     * @param targetID
+     *            A string representing the ID of the new target.
      */
     void register(String targetID) {
-        Map<String, String> attr = new HashMap<String, String>();
+        Map<String, String> attr = new HashMap<>();
         attr.put(TargetObject.KEY_ID, targetID);
-        Map<String, String> tags = new HashMap<String, String>();
+        Map<String, String> tags = new HashMap<>();
         m_targetRepository.create(attr, tags);
         getStatefulTargetObject(targetID).updateTargetObject(false);
     }
@@ -340,25 +357,35 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
     /**
      * Notifies interested parties of a change to a <code>StatefulTargetObject</code>.
      * 
-     * @param stoi The <code>StatefulTargetObject</code> which has changed.
-     * @param topic A topic string for posting the event.
-     * @param additionalProperties A Properties event, already containing some extra properties. If
-     *        RepositoryObject.EVENT_ENTITY is used, it will be overwritten.
+     * @param stoi
+     *            The <code>StatefulTargetObject</code> which has changed.
+     * @param topic
+     *            A topic string for posting the event.
+     * @param additionalProperties
+     *            A Properties event, already containing some extra properties. If RepositoryObject.EVENT_ENTITY is
+     *            used, it will be overwritten.
      */
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     void notifyChanged(StatefulTargetObject stoi, String topic, Properties additionalProperties) {
         additionalProperties.put(RepositoryObject.EVENT_ENTITY, stoi);
         additionalProperties.put(SessionFactory.SERVICE_SID, m_sessionID);
-        m_eventAdmin.postEvent(new Event(topic, (Dictionary) additionalProperties));
+        m_eventAdmin.postEvent(new org.osgi.service.event.Event(topic, (Dictionary) additionalProperties));
     }
 
     /**
      * Notifies interested parties of a change to a <code>StatefulTargetObject</code>.
      * 
-     * @param stoi The <code>StatefulTargetObject</code> which has changed.
-     * @param topic A topic string for posting the event.
+     * @param stoi
+     *            The <code>StatefulTargetObject</code> which has changed.
+     * @param topic
+     *            A topic string for posting the event.
      */
     void notifyChanged(StatefulTargetObject stoi, String topic) {
         notifyChanged(stoi, topic, new Properties());
+    }
+
+    private boolean isShowUnregisteredTargets() {
+        return m_repoConfig.isShowUnregisteredTargets();
     }
 
     /**
@@ -366,13 +393,15 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
      */
     private void populate() {
         synchronized (m_repository) {
-            List<StatefulTargetObjectImpl> touched = new ArrayList<StatefulTargetObjectImpl>();
+            List<StatefulTargetObjectImpl> touched = new ArrayList<>();
             touched.addAll(parseTargetRepository());
-            touched.addAll(parseAuditLog());
+            if (isShowUnregisteredTargets()) {
+                touched.addAll(parseAuditLog());
+            }
 
             // Now, it is possible we have not touched all objects. Find out which these are, and make
             // them check whether they should still exist.
-            List<StatefulTargetObjectImpl> all = new ArrayList<StatefulTargetObjectImpl>(m_repository.values());
+            List<StatefulTargetObjectImpl> all = new ArrayList<>(m_repository.values());
             all.removeAll(touched);
             for (StatefulTargetObjectImpl stoi : all) {
                 stoi.updateTargetObject(false);
@@ -389,15 +418,15 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
     }
 
     /**
-     * Checks all inhabitants of the <code>TargetRepository</code> to see
-     * whether we already have a stateful representation of them.
+     * Checks all inhabitants of the <code>TargetRepository</code> to see whether we already have a stateful
+     * representation of them.
      * 
-     * @param needsVerify states whether the objects which are 'touched' by this
-     *        actions should verify their existence.
+     * @param needsVerify
+     *            states whether the objects which are 'touched' by this actions should verify their existence.
      * @return A list of all the target objects that have been touched by this action.
      */
     private List<StatefulTargetObjectImpl> parseTargetRepository() {
-        List<StatefulTargetObjectImpl> result = new ArrayList<StatefulTargetObjectImpl>();
+        List<StatefulTargetObjectImpl> result = new ArrayList<>();
         for (TargetObject to : m_targetRepository.get()) {
             StatefulTargetObjectImpl stoi = getStatefulTargetObject(to.getID());
             if (stoi == null) {
@@ -412,15 +441,14 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
     }
 
     /**
-     * Checks the audit log to see whether we already have a
-     * stateful object for all targets mentioned there.
+     * Checks the audit log to see whether we already have a stateful object for all targets mentioned there.
      * 
-     * @param needsVerify states whether the objects which are 'touched' by this
-     *        actions should verify their existence.
+     * @param needsVerify
+     *            states whether the objects which are 'touched' by this actions should verify their existence.
      */
     private List<StatefulTargetObjectImpl> parseAuditLog() {
-        List<StatefulTargetObjectImpl> result = new ArrayList<StatefulTargetObjectImpl>();
-        List<LogDescriptor> descriptors = null;
+        List<StatefulTargetObjectImpl> result = new ArrayList<>();
+        List<Descriptor> descriptors = null;
         try {
             descriptors = m_auditLogStore.getDescriptors();
         }
@@ -432,15 +460,14 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
             return result;
         }
 
-        Set<String> targetIDs = new HashSet<String>();
-        for (LogDescriptor l : descriptors) {
+        Set<String> targetIDs = new HashSet<>();
+        for (Descriptor l : descriptors) {
             targetIDs.add(l.getTargetID());
         }
 
         /*
-         * Note: the parsing of the audit log and the creation/notification of the
-         * stateful objects has been separated, to prevent calling updateAuditEvents()
-         * multiple times on targets which have more than one log.
+         * Note: the parsing of the audit log and the creation/notification of the stateful objects has been separated,
+         * to prevent calling updateAuditEvents() multiple times on targets which have more than one log.
          */
         synchronized (m_repository) {
             for (String targetID : targetIDs) {
@@ -458,35 +485,46 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
     }
 
     /**
-     * Approves the changes that will happen to the target based on the
-     * changes in the shop by generating a new deployment version.
+     * Approves the changes that will happen to the target based on the changes in the shop by generating a new
+     * deployment version.
      * 
-     * @param targetID A string representing a target ID.
+     * @param targetID
+     *            A string representing a target ID.
      * @return The version identifier of the new deployment package.
-     * @throws java.io.IOException When there is a problem generating the deployment version.
+     * @throws java.io.IOException
+     *             When there is a problem generating the deployment version.
      */
     String approve(String targetID) throws IOException {
-        return generateDeploymentVersion(targetID).getVersion();
+        DeploymentVersionObject mostRecentDeploymentVersion = getMostRecentDeploymentVersion(targetID);
+        String nextVersion;
+        if (mostRecentDeploymentVersion == null) {
+            nextVersion = nextVersion(null);
+        }
+        else {
+            nextVersion = nextVersion(mostRecentDeploymentVersion.getVersion());
+        }
+        return nextVersion;
+        // return generateDeploymentVersion(targetID).getVersion();
     }
 
     /**
-     * Generates an array of bundle URLs which have to be deployed on
-     * the target, given the current state of the shop.
-     * TODO: In the future, we want to add support for multiple shops.
-     * TODO: Is this prone to concurrency issues with changes distribution- and
-     * feature objects?
+     * Generates an array of bundle URLs which have to be deployed on the target, given the current state of the shop.
+     * TODO: In the future, we want to add support for multiple shops. TODO: Is this prone to concurrency issues with
+     * changes distribution- and feature objects?
      * 
-     * @param targetID A string representing a target.
+     * @param targetID
+     *            A string representing a target.
      * @return An array of artifact URLs.
-     * @throws java.io.IOException When there is a problem processing an artifact for deployment.
+     * @throws java.io.IOException
+     *             When there is a problem processing an artifact for deployment.
      */
     DeploymentArtifact[] getNecessaryDeploymentArtifacts(String targetID, String version) throws IOException {
         TargetObject to = getTargetObject(targetID);
 
-        Map<ArtifactObject, String> bundles = new HashMap<ArtifactObject, String>();
-        Map<ArtifactObject, String> artifacts = new HashMap<ArtifactObject, String>();
+        Map<ArtifactObject, String> bundles = new HashMap<>();
+        Map<ArtifactObject, String> artifacts = new HashMap<>();
         Map<ArtifactObject, Map<FeatureObject, List<DistributionObject>>> path =
-            new HashMap<ArtifactObject, Map<FeatureObject, List<DistributionObject>>>();
+            new HashMap<>();
 
         // First, find all basic bundles and artifacts. An while we're traversing the
         // tree of objects, build the tree of properties.
@@ -502,12 +540,12 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
                         }
                         Map<FeatureObject, List<DistributionObject>> featureToDistribution = path.get(artifact);
                         if (featureToDistribution == null) {
-                            featureToDistribution = new HashMap<FeatureObject, List<DistributionObject>>();
+                            featureToDistribution = new HashMap<>();
                             path.put(artifact, featureToDistribution);
                         }
                         List<DistributionObject> distributions = featureToDistribution.get(feature);
                         if (distributions == null) {
-                            distributions = new ArrayList<DistributionObject>();
+                            distributions = new ArrayList<>();
                             featureToDistribution.put(feature, distributions);
                         }
                         distributions.add(distribution);
@@ -517,10 +555,7 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
         }
 
         // Find all processors
-        Map<String, ArtifactObject> allProcessors = new HashMap<String, ArtifactObject>();
-        for (ArtifactObject bundle : m_artifactRepository.getResourceProcessors()) {
-            allProcessors.put(m_bundleHelper.getResourceProcessorPIDs(bundle), bundle);
-        }
+        Map<String, ArtifactObject> allProcessors = getAllProcessors();
 
         // Determine all resource processors we need
         for (String processor : artifacts.values()) {
@@ -528,16 +563,16 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
                 ArtifactObject bundle = allProcessors.get(processor);
                 if (bundle == null) {
                     m_log.log(LogService.LOG_ERROR, "Unable to create deployment version: there is no resource processing bundle available that publishes " + processor);
-                    throw new IllegalStateException("Unable to create deployment version: there is no resource processing bundle available that publishes " + processor);
+                    throw new IOException("Unable to create deployment version: there is no resource processing bundle available that publishes " + processor);
                 }
                 bundles.put(bundle, processor);
             }
         }
 
-        List<DeploymentArtifact> result = new ArrayList<DeploymentArtifact>();
+        List<DeploymentArtifact> result = new ArrayList<>();
 
         for (ArtifactObject bundle : bundles.keySet()) {
-            Map<String, String> directives = new HashMap<String, String>();
+            Map<String, String> directives = new HashMap<>();
             if (m_bundleHelper.isResourceProcessor(bundle)) {
                 // it's a resource processor, mark it as such.
                 directives.put(DeploymentArtifact.DIRECTIVE_ISCUSTOMIZER, "true");
@@ -555,11 +590,11 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
                 directives.put(DeploymentArtifact.REPOSITORY_PATH, repositoryPath);
             }
 
-            result.add(m_deploymentRepository.createDeploymentArtifact(bundle.getURL(), directives));
+            result.add(m_deploymentRepository.createDeploymentArtifact(bundle.getURL(), bundle.getSize(), directives));
         }
 
         for (ArtifactObject artifact : artifacts.keySet()) {
-            Map<String, String> directives = new HashMap<String, String>();
+            Map<String, String> directives = new HashMap<>();
             directives.put(DeploymentArtifact.DIRECTIVE_KEY_PROCESSORID, artifact.getProcessorPID());
             directives.put(DeploymentArtifact.DIRECTIVE_KEY_BASEURL, artifact.getURL());
             if (artifact.getResourceId() != null) {
@@ -571,10 +606,39 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
                 directives.put(DeploymentArtifact.REPOSITORY_PATH, repositoryPath);
             }
             result.add(m_deploymentRepository.createDeploymentArtifact(
-                m_artifactRepository.preprocessArtifact(artifact, to, targetID, version), directives));
+                m_artifactRepository.preprocessArtifact(artifact, to, targetID, version), artifact.getSize(), directives));
         }
 
         return result.toArray(new DeploymentArtifact[result.size()]);
+    }
+
+    /**
+     * Returns a map of all resource processors that are available. If there are multiple versions of a specific
+     * processor, it will only return the latest version.
+     * 
+     * @return a map of all resource processors, indexed by processor ID
+     */
+    private Map<String, ArtifactObject> getAllProcessors() {
+        Map<String, ArtifactObject> allProcessors = new HashMap<>();
+        for (ArtifactObject processorBundle : m_artifactRepository.getResourceProcessors()) {
+            String pid = m_bundleHelper.getResourceProcessorPIDs(processorBundle);
+            ArtifactObject existingProcessorBundle = allProcessors.get(pid);
+            if (existingProcessorBundle == null) {
+                allProcessors.put(pid, processorBundle);
+            }
+            else {
+                // if there are multiple versions of a resource processor, we explicitly want to always
+                // return the latest version of a resource processor...
+                String existingVersionString = existingProcessorBundle.getAttribute(BundleHelper.KEY_VERSION);
+                String newVersionString = processorBundle.getAttribute(BundleHelper.KEY_VERSION);
+                Version existingVersion = existingVersionString == null ? Version.emptyVersion : Version.parseVersion(existingVersionString);
+                Version newVersion = newVersionString == null ? Version.emptyVersion : Version.parseVersion(newVersionString);
+                if (existingVersion.compareTo(newVersion) < 0) {
+                    allProcessors.put(pid, processorBundle);
+                }
+            }
+        }
+        return allProcessors;
     }
 
     private String getRepositoryPath(ArtifactObject artifact,
@@ -598,15 +662,12 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
     /**
      * Quick method to find all artifacts that need to be deployed to a target.
      */
+    // TODO this method strongly resembles part of getNecessaryDeploymentArtifacts(), merge code?!
     ArtifactObject[] getNecessaryArtifacts(String targetID) {
-        List<ArtifactObject> result = new ArrayList<ArtifactObject>();
+        List<ArtifactObject> result = new ArrayList<>();
         TargetObject to = getTargetObject(targetID);
 
-        Map<String, ArtifactObject> allProcessors = new HashMap<String, ArtifactObject>();
-        for (ArtifactObject bundle : m_artifactRepository.getResourceProcessors()) {
-            allProcessors.put(m_bundleHelper.getResourceProcessorPIDs(bundle), bundle);
-        }
-
+        Map<String, ArtifactObject> allProcessors = getAllProcessors();
         if (to != null) {
             for (DistributionObject distribution : to.getDistributions()) {
                 for (FeatureObject feature : distribution.getFeatures()) {
@@ -615,13 +676,13 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
                         if (!m_bundleHelper.canUse(artifact)) {
                             String processorPID = artifact.getProcessorPID();
                             if (processorPID == null) {
-                                m_log.log(LogService.LOG_ERROR, "Cannot gather necessary artifacts: no processor PID defined for " + artifact.getName());
+                                m_log.log(LogService.LOG_WARNING, "Cannot gather necessary artifacts: no processor PID defined for " + artifact.getName());
                                 return null;
                             }
                             ArtifactObject processor = allProcessors.get(processorPID);
                             if (processor == null) {
                                 // this means we cannot create a useful version; return null.
-                            	m_log.log(LogService.LOG_ERROR, "Cannot gather necessary artifacts: failed to find resource processor named '" + artifact.getProcessorPID() + "' for artifact '" + artifact.getName() + "'!");
+                                m_log.log(LogService.LOG_WARNING, "Cannot gather necessary artifacts: failed to find resource processor named '" + artifact.getProcessorPID() + "' for artifact '" + artifact.getName() + "'!");
                                 return null;
                             }
                             result.add(processor);
@@ -635,18 +696,19 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
     }
 
     /**
-     * Generates a new deployment version for the the given target,
-     * based on the artifacts it is linked to by the distributions it is
-     * associated to.
+     * Generates a new deployment version for the the given target, based on the artifacts it is linked to by the
+     * distributions it is associated to.
      * 
-     * @param targetID A string representing a target.
+     * @param targetID
+     *            A string representing a target.
      * @return A new DeploymentVersionObject, representing this new version for the target.
-     * @throws java.io.IOException When there is a problem determining the artifacts to be deployed.
+     * @throws java.io.IOException
+     *             When there is a problem determining the artifacts to be deployed.
      */
     DeploymentVersionObject generateDeploymentVersion(String targetID) throws IOException {
-        Map<String, String> attr = new HashMap<String, String>();
+        Map<String, String> attr = new HashMap<>();
         attr.put(DeploymentVersionObject.KEY_TARGETID, targetID);
-        Map<String, String> tags = new HashMap<String, String>();
+        Map<String, String> tags = new HashMap<>();
 
         DeploymentVersionObject mostRecentDeploymentVersion = getMostRecentDeploymentVersion(targetID);
         String nextVersion;
@@ -674,18 +736,18 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
     }
 
     /**
-     * Generates the next version, based on the version passed in.
-     * The version is assumed to be an OSGi-version; for now, the next
-     * 'major' version is generated. In the future, we might want to do
-     * 'smarter' things here, like checking the impact of a new version
-     * and use the minor and micro versions, or attach some qualifier.
+     * Generates the next version, based on the version passed in. The version is assumed to be an OSGi-version; for
+     * now, the next 'major' version is generated. In the future, we might want to do 'smarter' things here, like
+     * checking the impact of a new version and use the minor and micro versions, or attach some qualifier.
      * 
-     * @param version A string representing a deployment version's version.
+     * @param version
+     *            A string representing a deployment version's version.
      * @return A string representing the next version.
      */
     private static String nextVersion(String version) {
         try {
-            Version v = new Version(version);
+            // in case the given version is null or empty, v will be '0.0.0'...
+            Version v = Version.parseVersion(version);
             Version result = new Version(v.getMajor() + 1, 0, 0);
             return result.toString();
         }
@@ -695,60 +757,197 @@ public class StatefulTargetRepositoryImpl implements StatefulTargetRepository, E
         }
     }
 
-    public void handleEvent(Event event) {
+    public void handleEvent(org.osgi.service.event.Event event) {
         String topic = event.getTopic();
-        if (TargetObject.TOPIC_ADDED.equals(topic)) {
-            synchronized (m_repository) {
-                String id = ((TargetObject) event.getProperty(RepositoryObject.EVENT_ENTITY)).getID();
-                StatefulTargetObjectImpl stoi = getStatefulTargetObject(id);
-                if (stoi == null) {
-                    createStateful(id);
+        if (RepositoryAdmin.PRIVATE_TOPIC_HOLDUNTILREFRESH.equals(topic)) {
+            m_holdEvents = true;
+        }
+        if (!m_holdEvents) {
+            if (TargetObject.PRIVATE_TOPIC_ADDED.equals(topic)) {
+                synchronized (m_repository) {
+                    String id = ((TargetObject) event.getProperty(RepositoryObject.EVENT_ENTITY)).getID();
+                    StatefulTargetObjectImpl stoi = getStatefulTargetObject(id);
+                    if (stoi == null) {
+                        createStateful(id);
+                    }
+                    else {
+                        stoi.updateTargetObject(true);
+                    }
                 }
-                else {
-                    stoi.updateTargetObject(true);
+            }
+            else if (TargetObject.PRIVATE_TOPIC_CHANGED.equals(topic)) {
+                synchronized (m_repository) {
+                    String id = ((TargetObject) event.getProperty(RepositoryObject.EVENT_ENTITY)).getID();
+                    StatefulTargetObjectImpl stoi = getStatefulTargetObject(id);
+                    if (stoi != null) {
+                        stoi.determineStatus();
+                    }
+                }
+            }
+            else if (TargetObject.PRIVATE_TOPIC_REMOVED.equals(topic)) {
+                synchronized (m_repository) {
+                    String id = ((TargetObject) event.getProperty(RepositoryObject.EVENT_ENTITY)).getID();
+                    StatefulTargetObjectImpl stoi = getStatefulTargetObject(id);
+                    // if the stateful target is already gone; we don't have to do anything...
+                    if (stoi != null) {
+                        stoi.updateTargetObject(true);
+                    }
+                }
+            }
+            else if (DeploymentVersionObject.PRIVATE_TOPIC_ADDED.equals(topic) || DeploymentVersionObject.PRIVATE_TOPIC_REMOVED.equals(topic)) {
+                synchronized (m_repository) {
+                    DeploymentVersionObject deploymentVersionObject = ((DeploymentVersionObject) event.getProperty(RepositoryObject.EVENT_ENTITY));
+                    String id = deploymentVersionObject.getTargetID();
+                    StatefulTargetObjectImpl stoi = getStatefulTargetObject(id);
+                    if (stoi == null) {
+                        createStateful(id);
+                    }
+                    else {
+                        stoi.updateDeploymentVersions(deploymentVersionObject);
+                    }
+                }
+            }
+            else if (!RepositoryAdmin.PRIVATE_TOPIC_LOGIN.equals(topic) && !RepositoryAdmin.PRIVATE_TOPIC_REFRESH.equals(topic)) {
+                // Something else has changed; however, the entire shop may have an influence on
+                // any target, so recheck everything that is reachable from the entity...
+
+                RepositoryObject entity = (RepositoryObject) event.getProperty(RepositoryObject.EVENT_ENTITY);
+                if (entity != null) {
+                    synchronized (m_repository) {
+                        for (StatefulTargetObjectImpl stoi : m_repository.values()) {
+                            // Check whether the entity is reachable from this target...
+                            if (isReachableFrom(stoi, entity)) {
+                                stoi.determineStatus();
+                            }
+                        }
+                    }
                 }
             }
         }
-        else if (TargetObject.TOPIC_REMOVED.equals(topic)) {
-            synchronized (m_repository) {
-                String id = ((TargetObject) event.getProperty(RepositoryObject.EVENT_ENTITY)).getID();
-                StatefulTargetObjectImpl stoi = getStatefulTargetObject(id);
-                // if the stateful target is already gone; we don't have to do anything...
-                if (stoi != null) {
-                    stoi.updateTargetObject(true);
-                }
-            }
-        }
-        else if (DeploymentVersionObject.TOPIC_ADDED.equals(topic) || DeploymentVersionObject.TOPIC_REMOVED.equals(topic)) {
-            synchronized (m_repository) {
-                DeploymentVersionObject deploymentVersionObject = ((DeploymentVersionObject) event.getProperty(RepositoryObject.EVENT_ENTITY));
-                String id = deploymentVersionObject.getTargetID();
-                StatefulTargetObjectImpl stoi = getStatefulTargetObject(id);
-                if (stoi == null) {
-                    createStateful(id);
-                }
-                else {
-                    stoi.updateDeploymentVersions(deploymentVersionObject);
-                }
-            }
-        }
-        else if (RepositoryAdmin.TOPIC_LOGIN.equals(topic) || RepositoryAdmin.TOPIC_REFRESH.equals(topic)) {
+
+        if (RepositoryAdmin.PRIVATE_TOPIC_LOGIN.equals(topic) || RepositoryAdmin.PRIVATE_TOPIC_REFRESH.equals(topic)) {
+            m_holdEvents = false;
             synchronized (m_repository) {
                 populate();
             }
         }
-        else {
-            // Something else has changed; however, the entire shop may have an influence on
-            // any target, so recheck everything.
-            synchronized (m_repository) {
-                for (StatefulTargetObjectImpl stoi : m_repository.values()) {
-                    stoi.determineStatus();
+    }
+
+    /**
+     * Determines whether a given entity is reachable from a given stateful target, by traversing all its associations.
+     * 
+     * @param target
+     *            the stateful target object to check;
+     * @param entity
+     *            the entity to test.
+     * @return <code>true</code> if the given entity is reachable from the given target, <code>false</code> otherwise.
+     */
+    private boolean isReachableFrom(StatefulTargetObjectImpl target, RepositoryObject entity) {
+        // ACE-467 ensure we only take registered targets into consideration...
+        if (!target.isRegistered()) {
+            return false;
+        }
+
+        if (entity instanceof DistributionObject) {
+            return target.isAssociated(entity, DistributionObject.class);
+        }
+        else if (entity instanceof Distribution2TargetAssociation) {
+            return ((Distribution2TargetAssociation) entity).getRight().contains(target.getTargetObject());
+        }
+        else if (entity instanceof FeatureObject) {
+            for (DistributionObject dist : target.getDistributions()) {
+                if (dist.isAssociated(entity, FeatureObject.class)) {
+                    return true;
                 }
             }
         }
+        else if (entity instanceof Feature2DistributionAssociation) {
+            List<DistributionObject> associatedDistributions = ((Feature2DistributionAssociation) entity).getRight();
+            for (DistributionObject dist : target.getDistributions()) {
+                if (associatedDistributions.contains(dist)) {
+                    return true;
+                }
+            }
+        }
+        else if (entity instanceof ArtifactObject) {
+            List<ArtifactObject> reachableArtifacts = new ArrayList<>();
+            for (DistributionObject dist : target.getDistributions()) {
+                for (FeatureObject feat : dist.getFeatures()) {
+                    if (feat.isAssociated(entity, ArtifactObject.class)) {
+                        return true;
+                    }
+                    else {
+                        // Keep a list of reachable artifacts while we're at it, used below...
+                        reachableArtifacts.addAll(feat.getArtifacts());
+                    }
+                }
+            }
+
+            // Not found as regular artifact, maybe we've got a resource processor?
+            String resourceProcessorPID = entity.getAttribute(BundleHelper.KEY_RESOURCE_PROCESSOR_PID);
+            if (resourceProcessorPID != null) {
+                for (ArtifactObject reachableArtifact : reachableArtifacts) {
+                    if (resourceProcessorPID.equals(reachableArtifact.getProcessorPID())) {
+                        return true;
+                    }
+                }
+            }
+        }
+        else if (entity instanceof Artifact2FeatureAssociation) {
+            for (DistributionObject dist : target.getDistributions()) {
+                List<FeatureObject> associatedFeatures = ((Artifact2FeatureAssociation) entity).getRight();
+                for (FeatureObject feat : dist.getFeatures()) {
+                    if (associatedFeatures.contains(feat)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        else {
+            // Uhoh, this actually shouldn't happen...
+            m_log.log(LogService.LOG_WARNING, "Unhandled entity in reachability check for stateful target: " + entity.getDefinition());
+        }
+        return false;
     }
 
     boolean needsNewVersion(ArtifactObject artifact, String targetID, String version) {
         return m_artifactRepository.needsNewVersion(artifact, getTargetObject(targetID), targetID, version);
+    }
+
+    @Override
+    public void preCommit() throws IOException {
+        synchronized (m_repository) {
+            for (StatefulTargetObjectImpl stoi : m_repository.values()) {
+                if (preCommitHasChanges(stoi)) {
+                    generateDeploymentVersion(stoi.getID());
+                }
+                stoi.resetApprovalState();
+            }
+        }
+    }
+
+    @Override
+    public void reset() {
+        synchronized (m_repository) {
+            for (StatefulTargetObjectImpl stoi : m_repository.values()) {
+                stoi.resetApprovalState();
+            }
+        }
+    }
+
+    @Override
+    public boolean hasChanges() {
+        synchronized (m_repository) {
+            for (StatefulTargetObjectImpl stoi : m_repository.values()) {
+                if (preCommitHasChanges(stoi)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean preCommitHasChanges(StatefulTargetObjectImpl stoi) {
+        return stoi.getApprovalState().equals(ApprovalState.Approved) && stoi.needsApprove();
     }
 }

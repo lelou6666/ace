@@ -19,24 +19,21 @@
 package org.apache.ace.client.repository.impl;
 
 import org.apache.ace.client.repository.stateful.impl.LogEventComparator;
-import org.apache.ace.log.LogEvent;
-import org.apache.ace.test.utils.TestUtils;
+import org.apache.ace.feedback.Event;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
-
 /**
- * Before fixing ACE-308 the comparator could "overflow" when casting a long to an
- * int, changing the sign of the result. For this specific case, it would fail. After
- * the fix, it no longer fails.
+ * Before fixing ACE-308 the comparator could "overflow" when casting a long to an int, changing the sign of the result.
+ * For this specific case, it would fail. After the fix, it no longer fails.
  */
 public class ACE308Test {
-    @Test( groups = { TestUtils.UNIT } )
+    @Test
     public void testLogEvents() {
-    	LogEventComparator c = new LogEventComparator();
-    	LogEvent left = new LogEvent("t", 1, 1, -1000000000000000000L, 0, null);
-    	LogEvent right = new LogEvent("t", 1, 1, 1, 0, null);
-    	Assert.assertTrue((left.getTime() - right.getTime()) < 0L);
-    	Assert.assertTrue(c.compare(left, right) < 0L);
+        LogEventComparator c = new LogEventComparator();
+        Event left = new Event("t", 1, 1, -1000000000000000000L, 0);
+        Event right = new Event("t", 1, 1, 1, 0);
+        Assert.assertTrue((left.getTime() - right.getTime()) < 0L);
+        Assert.assertTrue(c.compare(left, right) < 0L);
     }
 }

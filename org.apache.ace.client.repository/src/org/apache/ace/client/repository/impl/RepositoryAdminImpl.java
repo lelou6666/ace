@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Properties;
 
 import org.apache.ace.client.repository.ObjectRepository;
+import org.apache.ace.client.repository.PreCommitMember;
 import org.apache.ace.client.repository.RepositoryAdmin;
 import org.apache.ace.client.repository.RepositoryAdminLoginContext;
 import org.apache.ace.client.repository.RepositoryObject;
@@ -52,6 +53,7 @@ import org.apache.ace.client.repository.repository.Distribution2TargetAssociatio
 import org.apache.ace.client.repository.repository.DistributionRepository;
 import org.apache.ace.client.repository.repository.Feature2DistributionAssociationRepository;
 import org.apache.ace.client.repository.repository.FeatureRepository;
+import org.apache.ace.client.repository.repository.RepositoryConfiguration;
 import org.apache.ace.client.repository.repository.TargetRepository;
 import org.apache.ace.connectionfactory.ConnectionFactory;
 import org.apache.ace.repository.Repository;
@@ -72,37 +74,42 @@ import org.osgi.service.prefs.PreferencesService;
 import org.osgi.service.useradmin.User;
 
 /**
- * An implementation of RepositoryAdmin, responsible for managing <code>ObjectRepositoryImpl</code>
- * descendants.<br>
- * The actual repository managing is delegated to <code>RepositorySet</code>s, while the logic
- * for binding these sets together is located in this class. Set actual <code>RepositorySet</code>s
- * to be used are defined in <code>login(...)</code>.<br>
+ * An implementation of RepositoryAdmin, responsible for managing <code>ObjectRepositoryImpl</code> descendants.<br>
+ * The actual repository managing is delegated to <code>RepositorySet</code>s, while the logic for binding these sets
+ * together is located in this class. Set actual <code>RepositorySet</code>s to be used are defined in
+ * <code>login(...)</code>.<br>
  */
 public class RepositoryAdminImpl implements RepositoryAdmin {
     private final static String PREFS_LOCAL_FILE_ROOT = "ClientRepositoryAdmin";
     private final static String PREFS_LOCAL_FILE_LOCATION = "FileLocation";
     private final static String PREFS_LOCAL_FILE_CURRENT = "current";
     private final static String PREFS_LOCAL_FILE_BACKUP = "backup";
+    
+    private static final String KEY_CAUSE = "cause";
+    private static final String CAUSE_COMMIT = "commit";
+    private static final String CAUSE_REVERT = "revert";
+    private static final String CAUSE_CHECKOUT = "checkout";
 
     /**
      * Maps from interface classes of the ObjectRepositories to their implementations.
      */
-    @SuppressWarnings("unchecked")
-    private Map<Class<? extends ObjectRepository>, ObjectRepositoryImpl> m_repositories;
+    private Map<Class<? extends ObjectRepository<?>>, ObjectRepositoryImpl<?, ?>> m_repositories;
 
     private final String m_sessionID;
     private final Properties m_sessionProps;
+    private final RepositoryConfiguration m_repositoryConfig;
     private final ChangeNotifier m_changeNotifier;
     private final Object m_lock = new Object();
 
     // Injected by dependency manager
-    private volatile DependencyManager m_manager;
-    private volatile BundleContext m_context; 
+    private volatile DependencyManager m_dm;
+    private volatile BundleContext m_context;
     private volatile PreferencesService m_preferences;
     private volatile LogService m_log;
 
     private User m_user;
     private RepositorySet[] m_repositorySets;
+    private List<PreCommitMember> m_preCommitMembers;
 
     private List<Component[]> m_services;
     private ArtifactRepositoryImpl m_artifactRepositoryImpl;
@@ -115,9 +122,10 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
     private DeploymentVersionRepositoryImpl m_deploymentVersionRepositoryImpl;
     private ChangeNotifierManager m_changeNotifierManager;
 
-
-    public RepositoryAdminImpl(String sessionID) {
+    public RepositoryAdminImpl(String sessionID, RepositoryConfiguration repoConfig) {
         m_sessionID = sessionID;
+        m_repositoryConfig = repoConfig;
+        m_preCommitMembers = new ArrayList<>();
         m_sessionProps = new Properties();
         m_sessionProps.put(SessionFactory.SERVICE_SID, sessionID);
         m_changeNotifierManager = new ChangeNotifierManager();
@@ -129,16 +137,14 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
     }
 
     /**
-     * Returns a list of instances that make up this composition. Instances are used to
-     * inject dependencies into.
-     *
+     * Returns a list of instances that make up this composition. Instances are used to inject dependencies into.
+     * 
      * @return list of instances
      */
     public Object[] getInstances() {
         return new Object[] { this, m_changeNotifierManager };
     }
 
-    @SuppressWarnings("unchecked")
     public void start() {
         synchronized (m_lock) {
             initialize(publishRepositories());
@@ -159,58 +165,68 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    void initialize(Map<Class<? extends ObjectRepository>, ObjectRepositoryImpl> repositories) {
+    void initialize(Map<Class<? extends ObjectRepository<?>>, ObjectRepositoryImpl<?, ?>> repositories) {
         m_repositories = repositories;
     }
 
-    @SuppressWarnings("unchecked")
-    private Map<Class<? extends ObjectRepository>, ObjectRepositoryImpl> publishRepositories() {
-        // create the repository objects, if this is the first time this method is called.
+    private ChangeNotifier createChangeNotifier(String topic) {
+        return m_changeNotifierManager.getConfiguredNotifier(topic, m_sessionID);
+    }
+
+    private Map<Class<? extends ObjectRepository<?>>, ObjectRepositoryImpl<?, ?>> publishRepositories() {
+        // create the repository objects, if this is the first time this method is called. In case a repository
+        // implementation needs some form of (runtime) configuration, adapt the RepositoryConfiguration object and pass
+        // this object to the repository...
         if (m_artifactRepositoryImpl == null) {
-            m_artifactRepositoryImpl = new ArtifactRepositoryImpl(m_changeNotifierManager.getConfiguredNotifier(RepositoryObject.PRIVATE_TOPIC_ROOT, RepositoryObject.PUBLIC_TOPIC_ROOT, ArtifactObject.TOPIC_ENTITY_ROOT, m_sessionID));
-            m_featureRepositoryImpl = new FeatureRepositoryImpl(m_changeNotifierManager.getConfiguredNotifier(RepositoryObject.PRIVATE_TOPIC_ROOT, RepositoryObject.PUBLIC_TOPIC_ROOT, FeatureObject.TOPIC_ENTITY_ROOT, m_sessionID));
-            m_artifact2FeatureAssociationRepositoryImpl = new Artifact2FeatureAssociationRepositoryImpl(m_artifactRepositoryImpl, m_featureRepositoryImpl, m_changeNotifierManager.getConfiguredNotifier(RepositoryObject.PRIVATE_TOPIC_ROOT, RepositoryObject.PUBLIC_TOPIC_ROOT, Artifact2FeatureAssociation.TOPIC_ENTITY_ROOT, m_sessionID));
-            m_distributionRepositoryImpl = new DistributionRepositoryImpl(m_changeNotifierManager.getConfiguredNotifier(RepositoryObject.PRIVATE_TOPIC_ROOT, RepositoryObject.PUBLIC_TOPIC_ROOT, DistributionObject.TOPIC_ENTITY_ROOT, m_sessionID));
-            m_feature2DistributionAssociationRepositoryImpl = new Feature2DistributionAssociationRepositoryImpl(m_featureRepositoryImpl, m_distributionRepositoryImpl, m_changeNotifierManager.getConfiguredNotifier(RepositoryObject.PRIVATE_TOPIC_ROOT, RepositoryObject.PUBLIC_TOPIC_ROOT, Feature2DistributionAssociation.TOPIC_ENTITY_ROOT, m_sessionID));
-            m_targetRepositoryImpl = new TargetRepositoryImpl(m_changeNotifierManager.getConfiguredNotifier(RepositoryObject.PRIVATE_TOPIC_ROOT, RepositoryObject.PUBLIC_TOPIC_ROOT, TargetObject.TOPIC_ENTITY_ROOT, m_sessionID));
-            m_distribution2TargetAssociationRepositoryImpl = new Distribution2TargetAssociationRepositoryImpl(m_distributionRepositoryImpl, m_targetRepositoryImpl, m_changeNotifierManager.getConfiguredNotifier(RepositoryObject.PRIVATE_TOPIC_ROOT, RepositoryObject.PUBLIC_TOPIC_ROOT, Distribution2TargetAssociation.TOPIC_ENTITY_ROOT, m_sessionID));
-            m_deploymentVersionRepositoryImpl = new DeploymentVersionRepositoryImpl(m_changeNotifierManager.getConfiguredNotifier(RepositoryObject.PRIVATE_TOPIC_ROOT, RepositoryObject.PUBLIC_TOPIC_ROOT, DeploymentVersionObject.TOPIC_ENTITY_ROOT, m_sessionID));
+            m_artifactRepositoryImpl = new ArtifactRepositoryImpl(createChangeNotifier(ArtifactObject.TOPIC_ENTITY_ROOT), m_repositoryConfig);
+            m_featureRepositoryImpl = new FeatureRepositoryImpl(createChangeNotifier(FeatureObject.TOPIC_ENTITY_ROOT), m_repositoryConfig);
+            m_distributionRepositoryImpl = new DistributionRepositoryImpl(createChangeNotifier(DistributionObject.TOPIC_ENTITY_ROOT), m_repositoryConfig);
+            m_targetRepositoryImpl = new TargetRepositoryImpl(createChangeNotifier(TargetObject.TOPIC_ENTITY_ROOT), m_repositoryConfig);
+            //
+            m_deploymentVersionRepositoryImpl = new DeploymentVersionRepositoryImpl(createChangeNotifier(DeploymentVersionObject.TOPIC_ENTITY_ROOT), m_repositoryConfig);
+            //
+            m_artifact2FeatureAssociationRepositoryImpl = new Artifact2FeatureAssociationRepositoryImpl(m_artifactRepositoryImpl, m_featureRepositoryImpl, createChangeNotifier(Artifact2FeatureAssociation.TOPIC_ENTITY_ROOT), m_repositoryConfig);
+            m_feature2DistributionAssociationRepositoryImpl = new Feature2DistributionAssociationRepositoryImpl(m_featureRepositoryImpl, m_distributionRepositoryImpl, createChangeNotifier(Feature2DistributionAssociation.TOPIC_ENTITY_ROOT), m_repositoryConfig);
+            m_distribution2TargetAssociationRepositoryImpl = new Distribution2TargetAssociationRepositoryImpl(m_distributionRepositoryImpl, m_targetRepositoryImpl, createChangeNotifier(Distribution2TargetAssociation.TOPIC_ENTITY_ROOT), m_repositoryConfig);
         }
-        
+
         // first, register the artifact repository manually; it needs some special care.
-        Component artifactRepoService = m_manager.createComponent()
+        Component artifactRepoService = m_dm.createComponent()
             .setInterface(ArtifactRepository.class.getName(), m_sessionProps)
             .setImplementation(m_artifactRepositoryImpl)
-            .add(m_manager.createServiceDependency().setService(ConnectionFactory.class).setRequired(true))
-            .add(m_manager.createServiceDependency().setService(LogService.class).setRequired(false))
-            .add(m_manager.createServiceDependency().setService(ArtifactHelper.class).setRequired(false).setAutoConfig(false).setCallbacks(this, "addArtifactHelper", "removeArtifactHelper"));
-        
-        Dictionary topic = new Hashtable();
+            .add(m_dm.createServiceDependency().setService(ConnectionFactory.class).setRequired(true))
+            .add(m_dm.createServiceDependency().setService(LogService.class).setRequired(false))
+            .add(m_dm.createServiceDependency().setService(ArtifactHelper.class).setRequired(false).setAutoConfig(false).setCallbacks(this, "addArtifactHelper", "removeArtifactHelper"));
+
+        Dictionary<String, Object> topic = new Hashtable<>();
         topic.put(EventConstants.EVENT_FILTER, "(" + SessionFactory.SERVICE_SID + "=" + m_sessionID + ")");
         topic.put(EventConstants.EVENT_TOPIC, new String[] {});
-        
-        Component artifactHandlerService = m_manager.createComponent()
+
+        Component artifactHandlerService = m_dm.createComponent()
             .setInterface(EventHandler.class.getName(), topic)
             .setImplementation(m_artifactRepositoryImpl);
 
-        m_manager.add(artifactRepoService);
-        m_manager.add(artifactHandlerService);
+        m_dm.add(artifactRepoService);
+        m_dm.add(artifactHandlerService);
 
-        m_services = new ArrayList<Component[]>();
-        m_services.add(new Component[] {artifactRepoService, artifactHandlerService});
+        m_services = new ArrayList<>();
+        m_services.add(new Component[] { artifactRepoService, artifactHandlerService });
 
-        // register all repositories are services. Keep the service objects around, we need them to pull the services later.
-        m_services.add(registerRepository(Artifact2FeatureAssociationRepository.class, m_artifact2FeatureAssociationRepositoryImpl, new String[] {createPrivateObjectTopic(ArtifactObject.TOPIC_ENTITY_ROOT), createPrivateObjectTopic(FeatureObject.TOPIC_ENTITY_ROOT)}));
+        // register all repositories are services. Keep the service objects around, we need them to pull the services
+        // later.
+        m_services.add(registerRepository(Artifact2FeatureAssociationRepository.class, m_artifact2FeatureAssociationRepositoryImpl, new String[] { createPrivateObjectTopic(ArtifactObject.TOPIC_ENTITY_ROOT),
+            createPrivateObjectTopic(FeatureObject.TOPIC_ENTITY_ROOT) }));
         m_services.add(registerRepository(FeatureRepository.class, m_featureRepositoryImpl, new String[] {}));
-        m_services.add(registerRepository(Feature2DistributionAssociationRepository.class, m_feature2DistributionAssociationRepositoryImpl, new String[] {createPrivateObjectTopic(FeatureObject.TOPIC_ENTITY_ROOT), createPrivateObjectTopic(DistributionObject.TOPIC_ENTITY_ROOT)}));
+        m_services.add(registerRepository(Feature2DistributionAssociationRepository.class, m_feature2DistributionAssociationRepositoryImpl, new String[] { createPrivateObjectTopic(FeatureObject.TOPIC_ENTITY_ROOT),
+            createPrivateObjectTopic(DistributionObject.TOPIC_ENTITY_ROOT) }));
         m_services.add(registerRepository(DistributionRepository.class, m_distributionRepositoryImpl, new String[] {}));
-        m_services.add(registerRepository(Distribution2TargetAssociationRepository.class, m_distribution2TargetAssociationRepositoryImpl, new String[] {createPrivateObjectTopic(DistributionObject.TOPIC_ENTITY_ROOT), createPrivateObjectTopic(TargetObject.TOPIC_ENTITY_ROOT)}));
+        m_services.add(registerRepository(Distribution2TargetAssociationRepository.class, m_distribution2TargetAssociationRepositoryImpl, new String[] { createPrivateObjectTopic(DistributionObject.TOPIC_ENTITY_ROOT),
+            createPrivateObjectTopic(TargetObject.TOPIC_ENTITY_ROOT) }));
         m_services.add(registerRepository(TargetRepository.class, m_targetRepositoryImpl, new String[] {}));
         m_services.add(registerRepository(DeploymentVersionRepository.class, m_deploymentVersionRepositoryImpl, new String[] {}));
 
         // prepare the results.
-        Map<Class<? extends ObjectRepository>, ObjectRepositoryImpl> result = new HashMap<Class<? extends ObjectRepository>, ObjectRepositoryImpl>();
+        Map<Class<? extends ObjectRepository<?>>, ObjectRepositoryImpl<?, ?>> result = new HashMap<>();
 
         result.put(ArtifactRepository.class, m_artifactRepositoryImpl);
         result.put(Artifact2FeatureAssociationRepository.class, m_artifact2FeatureAssociationRepositoryImpl);
@@ -230,27 +246,27 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
     private void pullRepositories() {
         for (Component[] services : m_services) {
             for (Component service : services) {
-                m_manager.remove(service);
+                m_dm.remove(service);
             }
         }
     }
 
-    @SuppressWarnings("unchecked")
     private <T extends RepositoryObject> Component[] registerRepository(Class<? extends ObjectRepository<T>> iface, ObjectRepositoryImpl<?, T> implementation, String[] topics) {
-        Component repositoryService = m_manager.createComponent()
+        Component repositoryService = m_dm.createComponent()
             .setInterface(iface.getName(), m_sessionProps)
             .setImplementation(implementation)
-            .add(m_manager.createServiceDependency().setService(LogService.class).setRequired(false));
-        Dictionary topic = new Hashtable();
+            .add(m_dm.createServiceDependency().setService(LogService.class).setRequired(false));
+
+        Dictionary<String, Object> topic = new Hashtable<>();
         topic.put(EventConstants.EVENT_TOPIC, topics);
         topic.put(EventConstants.EVENT_FILTER, "(" + SessionFactory.SERVICE_SID + "=" + m_sessionID + ")");
-        Component handlerService = m_manager.createComponent()
+        Component handlerService = m_dm.createComponent()
             .setInterface(EventHandler.class.getName(), topic)
             .setImplementation(implementation);
 
-        m_manager.add(repositoryService);
-        m_manager.add(handlerService);
-        return new Component[] {repositoryService, handlerService};
+        m_dm.add(repositoryService);
+        m_dm.add(handlerService);
+        return new Component[] { repositoryService, handlerService };
     }
 
     /**
@@ -263,20 +279,33 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
     public void checkout() throws IOException {
         synchronized (m_lock) {
             ensureLogin();
+            m_changeNotifier.notifyChanged(TOPIC_HOLDUNTILREFRESH_SUFFIX, null);
+            for (PreCommitMember member : m_preCommitMembers) {
+                member.reset();
+            }
             for (RepositorySet set : m_repositorySets) {
                 set.checkout();
             }
-            m_changeNotifier.notifyChanged(TOPIC_REFRESH_SUFFIX, null);
+
+            Properties props = new Properties();
+            props.put(KEY_CAUSE, CAUSE_CHECKOUT);
+            m_changeNotifier.notifyChanged(TOPIC_REFRESH_SUFFIX, props);
         }
     }
 
     public void commit() throws IOException {
         synchronized (m_lock) {
             ensureLogin();
+            for (PreCommitMember member : m_preCommitMembers) {
+                member.preCommit();
+            }
             for (RepositorySet set : m_repositorySets) {
                 set.commit();
             }
-            m_changeNotifier.notifyChanged(TOPIC_REFRESH_SUFFIX, null);
+
+            Properties props = new Properties();
+            props.put(KEY_CAUSE, CAUSE_COMMIT);
+            m_changeNotifier.notifyChanged(TOPIC_REFRESH_SUFFIX, props);
         }
     }
 
@@ -294,10 +323,17 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
     public void revert() throws IOException {
         synchronized (m_lock) {
             ensureLogin();
+            m_changeNotifier.notifyChanged(TOPIC_HOLDUNTILREFRESH_SUFFIX, null);
+            for (PreCommitMember member : m_preCommitMembers) {
+                member.reset();
+            }
             for (RepositorySet set : m_repositorySets) {
                 set.revert();
             }
-            m_changeNotifier.notifyChanged(TOPIC_REFRESH_SUFFIX, null);
+            
+            Properties props = new Properties();
+            props.put(KEY_CAUSE, CAUSE_REVERT);
+            m_changeNotifier.notifyChanged(TOPIC_REFRESH_SUFFIX, props);
         }
     }
 
@@ -306,7 +342,7 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
             ensureLogin();
             boolean result = true;
             for (RepositorySet set : m_repositorySets) {
-                    result &= (set.isCurrent() || !set.writeAccess());
+                result &= (set.isCurrent() || !set.writeAccess());
             }
             return result;
         }
@@ -315,6 +351,11 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
     public boolean isModified() {
         synchronized (m_lock) {
             ensureLogin();
+            for (PreCommitMember member : m_preCommitMembers) {
+                if (member.hasChanges()) {
+                    return true;
+                }
+            }
             for (RepositorySet set : m_repositorySets) {
                 if (set.isModified()) {
                     return true;
@@ -339,32 +380,29 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
         RepositoryAdminLoginContextImpl impl = ((RepositoryAdminLoginContextImpl) context);
         RepositorySet[] repositorySets = getRepositorySets(impl);
 
-        synchronized(m_lock) {
-            // TODO I don't like this line, it should not be here...
-            ((ArtifactRepository) m_repositories.get(ArtifactRepository.class)).setObrBase(impl.getObrBase());
+        synchronized (m_lock) {
             login(impl.getUser(), repositorySets);
         }
     }
 
     /**
-     * Helper method for login; also allows injection of custom RepositorySet objects for
-     * testing purposes.
+     * Helper method for login; also allows injection of custom RepositorySet objects for testing purposes.
+     * 
      * @throws IOException
      */
     private void login(User user, RepositorySet[] sets) throws IOException {
-        synchronized(m_lock) {
+        synchronized (m_lock) {
             if (m_user != null) {
                 throw new IllegalStateException("Another user is logged in.");
             }
-
             m_user = user;
             m_repositorySets = sets;
+            m_changeNotifier.notifyChanged(TOPIC_HOLDUNTILREFRESH_SUFFIX, null);
             for (RepositorySet set : m_repositorySets) {
                 set.readLocal();
                 set.loadPreferences();
             }
         }
-
         m_changeNotifier.notifyChanged(TOPIC_LOGIN_SUFFIX, null);
     }
 
@@ -388,26 +426,29 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
             for (RepositorySet set : m_repositorySets) {
                 set.clearRepositories();
                 set.unregisterHandler();
-//                set.deleteLocal();
+                // set.deleteLocal();
             }
 
+            unloadRepositorySet(m_user);
+
             m_user = null;
-//            m_repositorySets = new RepositorySet[0];
+            // m_repositorySets = new RepositorySet[0];
         }
         m_changeNotifier.notifyChanged(TOPIC_LOGOUT_SUFFIX, null);
+
         if (exception != null) {
             throw exception;
         }
     }
-    
+
     public void deleteLocal() {
-    	synchronized (m_lock) {
-    		if (m_user != null && m_repositorySets != null) {
-    			for (RepositorySet set : m_repositorySets) {
-    				set.deleteLocal();
-    			}
-    		}
-    	}
+        synchronized (m_lock) {
+            if (m_user != null && m_repositorySets != null) {
+                for (RepositorySet set : m_repositorySets) {
+                    set.deleteLocal();
+                }
+            }
+        }
     }
 
     private boolean loggedIn() {
@@ -416,6 +457,7 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
 
     /**
      * Helper method to make sure a user is logged in.
+     * 
      * @throws IllegalStateException
      */
     private void ensureLogin() throws IllegalStateException {
@@ -427,13 +469,12 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
     /**
      * Helper method, creates RepositorySets based on the Login context.
      */
-    @SuppressWarnings("unchecked")
     private RepositorySet[] getRepositorySets(RepositoryAdminLoginContextImpl context) throws IOException {
         List<RepositorySetDescriptor> descriptors = context.getDescriptors();
-        
+
         // First, some sanity checks on the list of descriptors.
         for (RepositorySetDescriptor rsd : descriptors) {
-            for (Class c : rsd.m_objectRepositories) {
+            for (Class<?> c : rsd.m_objectRepositories) {
                 // Do we have an impl for each repository class?
                 if (!m_repositories.containsKey(c)) {
                     throw new IllegalArgumentException(rsd.toString() + " references repository class " + c.getName() + " for which no implementation is available.");
@@ -444,17 +485,16 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
         RepositorySet[] result = new RepositorySet[descriptors.size()];
 
         /*
-         * Create the lists of repositories and topics, and create and register
-         * the sets with these.
+         * Create the lists of repositories and topics, and create and register the sets with these.
          */
         for (int i = 0; i < result.length; i++) {
             RepositorySetDescriptor rsd = descriptors.get(i);
-            
-            ObjectRepositoryImpl[] impls = new ObjectRepositoryImpl[rsd.m_objectRepositories.length];
+
+            ObjectRepositoryImpl<?, ?>[] impls = new ObjectRepositoryImpl[rsd.m_objectRepositories.length];
             String[] topics = new String[rsd.m_objectRepositories.length];
             for (int j = 0; j < impls.length; j++) {
                 impls[j] = m_repositories.get(rsd.m_objectRepositories[j]);
-                topics[j] = impls[j].getTopicAll(true);
+                topics[j] = impls[j].getTopicAll(false);
             }
 
             result[i] = loadRepositorySet(context.getUser(), rsd, impls);
@@ -477,6 +517,7 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
 
     /**
      * Helper method for login.
+     * 
      * @throws IOException
      */
     private File getFileFromPreferences(Preferences repositoryPrefs, String type) throws IOException {
@@ -512,6 +553,7 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
 
     /**
      * Helper method for login.
+     * 
      * @throws IOException
      */
     private BackupRepository getBackupFromPreferences(Preferences repositoryPrefs) throws IOException {
@@ -522,6 +564,7 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
 
     /**
      * Helper method for login.
+     * 
      * @throws IOException
      */
     private CachedRepository getCachedRepositoryFromPreferences(Repository repository, Preferences repositoryPrefs) throws IOException {
@@ -531,27 +574,36 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
 
     /**
      * Helper method for login, which loads a set of repositories.
-     * @param user A <code>User</code> object
-     * @param rsd A RepositorySetDescriptor, defining the set to be created.
-     * @param repos An array of <code>ObjectRepositoryImpl</code> which this set should manage. Each
+     * 
+     * @param user
+     *            A <code>User</code> object
+     * @param rsd
+     *            A RepositorySetDescriptor, defining the set to be created.
+     * @param repos
+     *            An array of <code>ObjectRepositoryImpl</code> which this set should manage. Each
      * @return The newly created repository set.
      * @throws IOException
      */
-    @SuppressWarnings("unchecked")
-    public RepositorySet loadRepositorySet(User user, RepositorySetDescriptor rsd, ObjectRepositoryImpl[] repos) throws IOException {
+    public RepositorySet loadRepositorySet(User user, RepositorySetDescriptor rsd, ObjectRepositoryImpl<?, ?>[] repos) throws IOException {
         Repository repo = new RemoteRepository(rsd.m_location, rsd.m_customer, rsd.m_name);
 
         // Expose the repository itself as component so its dependencies get managed...
-        m_manager.add(m_manager.createComponent()
+        m_dm.add(m_dm.createComponent()
             .setImplementation(repo)
-            .add(m_manager.createServiceDependency()
+            .add(m_dm.createServiceDependency()
                 .setService(ConnectionFactory.class)
                 .setRequired(true)));
 
         Preferences prefs = m_preferences.getUserPreferences(user.getName());
+        prefs = prefs.node(m_sessionID);
         Preferences repoPrefs = getRepositoryPrefs(prefs, rsd.m_location, rsd.m_customer, rsd.m_name);
 
         return new RepositorySet(m_changeNotifier, m_log, user, repoPrefs, repos, getCachedRepositoryFromPreferences(repo, repoPrefs), rsd.m_name, rsd.m_writeAccess);
+    }
+
+    private void unloadRepositorySet(User user) {
+        Preferences prefs = m_preferences.getUserPreferences(user.getName());
+        prefs.remove(m_sessionID);
     }
 
     public int getNumberWithWorkingState(Class<? extends RepositoryObject> clazz, WorkingState state) {
@@ -577,13 +629,19 @@ public class RepositoryAdminImpl implements RepositoryAdmin {
         return (result == null) ? WorkingState.Unchanged : result;
     }
 
-    public void addArtifactHelper(ServiceReference ref, ArtifactHelper helper) {
+    public void addArtifactHelper(ServiceReference<ArtifactHelper> ref, ArtifactHelper helper) {
         String mimetype = (String) ref.getProperty(ArtifactHelper.KEY_MIMETYPE);
         m_artifactRepositoryImpl.addHelper(mimetype, helper);
     }
 
-    public synchronized void removeArtifactHelper(ServiceReference ref, ArtifactHelper helper) {
+    public synchronized void removeArtifactHelper(ServiceReference<ArtifactHelper> ref, ArtifactHelper helper) {
         String mimetype = (String) ref.getProperty(ArtifactHelper.KEY_MIMETYPE);
         m_artifactRepositoryImpl.removeHelper(mimetype, helper);
+    }
+
+    void addPreCommitMember(PreCommitMember member) {
+        synchronized (m_lock) {
+            m_preCommitMembers.add(member);
+        }
     }
 }

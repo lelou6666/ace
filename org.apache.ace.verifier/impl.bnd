@@ -1,3 +1,5 @@
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
 Export-Package: org.apache.ace.deployment.verifier,\
 	org.osgi.service.log,\
 	org.osgi.framework.wiring
@@ -10,7 +12,7 @@ Private-Package: org.apache.felix.framework,\
 	org.apache.ace.deployment.verifier.impl
 Import-Package: org.osgi.framework;version='[1.5,2)',\
 	*
-Bundle-Version: 1.0.0
+Bundle-Version: 1.1.1
 Bundle-Activator: org.apache.ace.deployment.verifier.impl.Activator
 Bundle-Name: Apache ACE Verifier Service
 Bundle-Description: Registers the Apache ACE verifier service

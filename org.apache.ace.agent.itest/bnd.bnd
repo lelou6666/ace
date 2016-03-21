@@ -1,8 +1,12 @@
-Test-Cases: ${classes;CONCRETE;EXTENDS;junit.framework.TestCase}
--runbundles: org.mockito.mockito-all,\
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
+-buildpath: \
+	osgi.core;version=4.2,\
 	org.apache.ace.agent;version=latest,\
+	org.apache.ace.builder;version=latest,\
 	org.apache.ace.test;version=latest,\
 	org.apache.felix.dependencymanager,\
+<<<<<<< HEAD
 	osgi.cmpn
 Private-Package: org.apache.ace.agent.itest
 -runee: JavaSE-1.6
@@ -10,13 +14,37 @@ Private-Package: org.apache.ace.agent.itest
 -runfw: org.apache.felix.framework
 -buildpath: ${^-buildpath}, osgi.core;version='[4.2,5)',\
 	osgi.cmpn,\
+=======
+	org.apache.felix.http.jetty;version='[2.2,3)',\
+	javax.servlet,\
+>>>>>>> refs/remotes/apache/trunk
 	junit.osgi,\
-	org.mockito.mockito-all,\
+	org.mockito.mockito-all
+
+-runfw: org.apache.felix.framework;version='[4,5)'
+-runbundles: \
 	org.apache.ace.agent;version=latest,\
-	org.apache.ace.test;version=latest
+	org.apache.ace.test;version=latest,\
+	org.apache.ace.builder;version=latest,\
+	org.apache.felix.configadmin,\
+	org.apache.felix.dependencymanager,\
+	org.apache.felix.http.jetty;version='[2.2,3)',\
+	org.apache.felix.log,\
+	osgi.cmpn
+-runvm: -ea
+-runee: JavaSE-1.7
 -runsystempackages: sun.reflect
-Import-Package: org.apache.ace.agent,\
+-runproperties: ${itestrunprops}
+-baseline:
+
+Test-Cases: ${classes;CONCRETE;EXTENDS;org.apache.ace.it.IntegrationTestBase}
+
+Private-Package: \
+	org.apache.ace.agent.itest
+Import-Package: \
+	org.apache.ace.agent,\
 	*
 Bundle-Version: 1.0.0
 Bundle-Name: Apache ACE Agent itest
 Bundle-Description: Integration test bundle for the Apache ACE Agent
+Bundle-Category: itest

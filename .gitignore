@@ -1,0 +1,16 @@
+.metadata/
+cnf/cache/
+cnf/*/.obrcache/
+.gradle/
+.recommenders/
+*/generated/
+*/bin/
+*/build/
+*/bin_test/
+*/reports/
+*~
+*/.settings/
+*/bundle-cache
+*/store
+*/test-output
+rat-report.xml

@@ -18,6 +18,7 @@
  */
 package org.apache.ace.obr.storage.file;
 
+import java.io.BufferedInputStream;
 import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
@@ -29,34 +30,29 @@ import java.math.BigInteger;
 import java.nio.channels.FileChannel;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.Dictionary;
+import java.util.List;
 import java.util.Stack;
-import java.util.jar.Attributes;
-import java.util.jar.JarInputStream;
-import java.util.jar.Manifest;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.apache.ace.obr.metadata.MetadataGenerator;
+import org.apache.ace.obr.metadata.util.ResourceMetaData;
 import org.apache.ace.obr.storage.BundleStore;
-import org.apache.ace.obr.storage.file.constants.OBRFileStoreConstants;
-import org.osgi.framework.Constants;
+import org.apache.ace.obr.storage.OBRFileStoreConstants;
 import org.osgi.service.cm.ConfigurationException;
 import org.osgi.service.cm.ManagedService;
 import org.osgi.service.log.LogService;
 
 /**
- * This BundleStore retrieves the files from the file system. Via the Configurator the relative path is set, and all bundles and
- * the repository.xml should be retrievable from that path (which will internally be converted to an absolute path).
+ * This BundleStore retrieves the files from the file system. Via the Configurator the relative path is set, and all
+ * bundles and the index.xml should be retrievable from that path (which will internally be converted to an
+ * absolute path).
  */
 public class BundleFileStore implements BundleStore, ManagedService {
-
-    // matches a valid OSGi version
-    private final Pattern VERSION_PATTERN = Pattern.compile("(\\d+)(\\.(\\d+)(\\.(\\d+)([\\.-]([\\w-]+))?)?)?");
-    
+    private static final String REPOSITORY_XML = "index.xml";
     private static int BUFFER_SIZE = 8 * 1024;
-    private static final String REPOSITORY_XML = "repository.xml";
 
+    private final Object m_lock = new Object();
     // injected by dependencymanager
     private volatile MetadataGenerator m_metadata;
     private volatile LogService m_log;
@@ -67,11 +63,13 @@ public class BundleFileStore implements BundleStore, ManagedService {
     /**
      * Checks if the the directory was modified since we last checked. If so, the meta-data generator is called.
      * 
-     * @throws IOException If there is a problem synchronizing the meta-data.
+     * @throws IOException
+     *             If there is a problem synchronizing the meta-data.
      */
     public void synchronizeMetadata() throws IOException {
-        File dir = m_dir;
-        synchronized (REPOSITORY_XML) {
+        synchronized (m_lock) {
+            File dir = m_dir;
+
             if (m_dirChecksum == null || !m_dirChecksum.equals(getDirChecksum(dir))) {
                 m_metadata.generateMetadata(dir);
                 m_dirChecksum = getDirChecksum(dir);
@@ -83,37 +81,51 @@ public class BundleFileStore implements BundleStore, ManagedService {
         if (REPOSITORY_XML.equals(fileName)) {
             synchronizeMetadata();
         }
+
         FileInputStream result = null;
         try {
-			result = new FileInputStream(createFile(fileName));
-		} catch (FileNotFoundException e) {
-			// Resource does not exist; notify caller by returning null...
-		}
-		return result;
+            result = new FileInputStream(createFile(fileName));
+        }
+        catch (FileNotFoundException e) {
+            // Resource does not exist; notify caller by returning null...
+        }
+
+        return result;
     }
 
-    public String put(InputStream data, String fileName) throws IOException {
-
+    public String put(InputStream data, String fileName, boolean replace) throws IOException {
+        if (fileName == null) {
+            fileName = "";
+        }
         File tempFile = downloadToTempFile(data);
 
-        ResourceMetaData metaData = getBundleMetaData(tempFile);
+        ResourceMetaData metaData = ResourceMetaData.getBundleMetaData(tempFile);
         if (metaData == null) {
-            metaData = getArtifactMetaData(fileName);
+            metaData = ResourceMetaData.getArtifactMetaData(fileName);
         }
         if (metaData == null) {
-            throw new IOException("Not a valid bundle and no filename found");
+            tempFile.delete();
+            throw new IOException("Not a valid bundle and no filename found (filename = " + fileName + ")");
         }
 
         File storeLocation = getResourceFile(metaData);
         if (storeLocation == null) {
-            throw new IOException("Failed to store resource");
+            tempFile.delete();
+            throw new IOException("Failed to store resource (filename = " + fileName + ")");
         }
+
         if (storeLocation.exists()) {
-            return null;
+            if (replace || compare(storeLocation, tempFile)) {
+                m_log.log(LogService.LOG_DEBUG, "Exact same resource already existed in OBR (filename = " + fileName + ")");
+            }
+            else {
+                m_log.log(LogService.LOG_ERROR, "Different resource with same name already existed in OBR (filename = " + fileName + ")");
+                return null;
+            }
         }
 
         moveFile(tempFile, storeLocation);
-        
+
         String filePath = storeLocation.toURI().toString().substring(getWorkingDir().toURI().toString().length());
         if (filePath.startsWith("/")) {
             filePath = filePath.substring(1);
@@ -121,12 +133,51 @@ public class BundleFileStore implements BundleStore, ManagedService {
         return filePath;
     }
 
+    /** Compares the contents of two files, returns <code>true</code> if they're exactly the same. */
+    private boolean compare(File first, File second) throws IOException {
+        BufferedInputStream bis = new BufferedInputStream(new FileInputStream(first));
+        BufferedInputStream bis2 = new BufferedInputStream(new FileInputStream(second));
+        int b1, b2;
+        try {
+            do {
+                b1 = bis.read();
+                b2 = bis2.read();
+                if (b1 != b2) {
+                    return false;
+                }
+            }
+            while (b1 != -1 && b2 != -1);
+            return (b1 == b2);
+        }
+        finally {
+            if (bis != null) {
+                try {
+                    bis.close();
+                }
+                catch (IOException e) {
+                }
+            }
+            if (bis2 != null) {
+                try {
+                    bis2.close();
+                }
+                catch (IOException e) {
+                }
+            }
+        }
+    }
+
     public boolean remove(String fileName) throws IOException {
+        File dir;
+        synchronized (m_lock) {
+            dir = m_dir;
+        }
+
         File file = createFile(fileName);
         if (file.exists()) {
             if (file.delete()) {
                 // deleting empty parent dirs
-                while ((file = file.getParentFile()) != null && !file.equals(m_dir) && file.list().length == 0) {
+                while ((file = file.getParentFile()) != null && !file.equals(dir) && file.list().length == 0) {
                     file.delete();
                 }
                 return true;
@@ -138,8 +189,7 @@ public class BundleFileStore implements BundleStore, ManagedService {
         return false;
     }
 
-    @SuppressWarnings("unchecked")
-    public void updated(Dictionary dict) throws ConfigurationException {
+    public void updated(Dictionary<String, ?> dict) throws ConfigurationException {
         if (dict != null) {
             String path = (String) dict.get(OBRFileStoreConstants.FILE_LOCATION_KEY);
             if (path == null) {
@@ -157,8 +207,10 @@ public class BundleFileStore implements BundleStore, ManagedService {
                     throw new ConfigurationException(OBRFileStoreConstants.FILE_LOCATION_KEY, "Is not a directory: " + newDir);
                 }
 
-                m_dir = newDir;
-                m_dirChecksum = "";
+                synchronized (m_lock) {
+                    m_dir = newDir;
+                    m_dirChecksum = "";
+                }
             }
         }
     }
@@ -175,7 +227,6 @@ public class BundleFileStore implements BundleStore, ManagedService {
         }
     }
 
-
     /**
      * Computes a magic checksum used to determine whether there where changes in the directory without actually looking
      * into the files or using observation.
@@ -185,8 +236,6 @@ public class BundleFileStore implements BundleStore, ManagedService {
      * @return The checksum
      */
     private String getDirChecksum(File dir) {
-        long start = System.nanoTime();
-
         MessageDigest digest = null;
         try {
             digest = MessageDigest.getInstance("MD5");
@@ -197,7 +246,7 @@ public class BundleFileStore implements BundleStore, ManagedService {
             return "" + (System.currentTimeMillis() / 600000);
         }
 
-        Stack<File> dirs = new Stack<File>();
+        Stack<File> dirs = new Stack<>();
         dirs.push(dir);
         while (!dirs.isEmpty()) {
             File pwd = dirs.pop();
@@ -220,8 +269,10 @@ public class BundleFileStore implements BundleStore, ManagedService {
     /**
      * Downloads a given input stream to a temporary file.
      * 
-     * @param source the input stream to download;
-     * @throws IOException in case of I/O problems.
+     * @param source
+     *            the input stream to download;
+     * @throws IOException
+     *             in case of I/O problems.
      */
     private File downloadToTempFile(InputStream source) throws IOException {
         File tempFile = File.createTempFile("obr", ".tmp");
@@ -241,140 +292,85 @@ public class BundleFileStore implements BundleStore, ManagedService {
             closeQuietly(fos);
         }
     }
-    
-    /**
-     * Tries extract file metadata from a file assuming it is a valid OSGi bundle.
-     * 
-     * @param file the file to analyze
-     * @return the metadata, or <code>null</code> if the file is not a valid bundle.
-     */
-    private ResourceMetaData getBundleMetaData(File file) {
-        JarInputStream jis = null;
-        try {
-            jis = new JarInputStream(new FileInputStream(file));
-            Manifest manifest = jis.getManifest();
-            if (manifest != null) {
-                Attributes attributes = manifest.getMainAttributes();
-                if (attributes != null) {
-                    String bundleSymbolicName = attributes.getValue(Constants.BUNDLE_SYMBOLICNAME);
-                    String bundleVersion = attributes.getValue(Constants.BUNDLE_VERSION);
-                    if (bundleSymbolicName != null) {
-                    	// ACE-350 strip BSN parameters 
-                    	if(bundleSymbolicName.indexOf(";") > 0){
-                    		bundleSymbolicName = bundleSymbolicName.substring(0, bundleSymbolicName.indexOf(";"));
-                    	}
-                        if (bundleVersion == null) {
-                            bundleVersion = "0.0.0";
-                        }
-                        return new ResourceMetaData(bundleSymbolicName, bundleVersion, "jar");
-                    }
-                }
-            }
-            return null;
-        }
-        catch (Exception e) {
-            return null;
-        }
-        finally {
-            closeQuietly(jis);
-        }
-    }
-        
-    /**
-     * Tries extract file metadata from a filename assuming a pattern. The version must be a valid OSGi version. If no
-     * version is found the default "0.0.0" is returned.
-     * <br/><br/>
-     * Filename pattern: <code>&lt;filename&gt;[-&lt;version&gt;][.&lt;extension&gt;]<code>
-     * 
-     * @param file the fileName to analyze
-     * @return the metadata, or <code>null</code> if the file is not a valid bundle.
-     */
-    ResourceMetaData getArtifactMetaData(String fileName) {
-        
-        if (fileName == null || fileName.equals("")) {
-            return null;
-        }
 
-        String symbolicName = null;
-        String version = null;
-        String extension = null;
-
-        // determine extension
-        String[] fileNameParts = fileName.split("\\.");
-        if (fileNameParts.length > 1) {
-            extension = fileNameParts[fileNameParts.length - 1];
-            symbolicName = fileName.substring(0, fileName.lastIndexOf('.'));
-        }
-        else {
-            symbolicName = fileName;
-        }
-
-        // determine version
-        int dashIndex = symbolicName.indexOf('-');
-        while (dashIndex != -1 && version == null) {
-            String versionCandidate = symbolicName.substring(dashIndex + 1);
-            Matcher versionMatcher = VERSION_PATTERN.matcher(versionCandidate);
-            if (versionMatcher.matches()) {
-                symbolicName = symbolicName.substring(0, dashIndex);
-                version = versionCandidate;
-            }
-            else {
-                dashIndex = symbolicName.indexOf('-', dashIndex + 1);                
-            }
-        }
-        
-        if (version == null) {
-            version = "0.0.0";
-        }
-        return new ResourceMetaData(symbolicName, version, extension);
-    }
-    
     /**
      * Encapsulated the store layout strategy by creating the resource file based on the provided meta-data.
      * 
-     * @param metaData the meta-data for the resource
+     * @param metaData
+     *            the meta-data for the resource
      * @return the resource file
-     * @throws IOException in case of I/O problems.
+     * @throws IOException
+     *             in case of I/O problems.
      */
     private File getResourceFile(ResourceMetaData metaData) throws IOException {
-
-        File resourceFile = null;
-        String[] dirs = metaData.getSymbolicName().split("\\.");
-        for (String subDir : dirs) {
-            if (resourceFile == null) {
-                resourceFile = new File(getWorkingDir(), subDir);
-            }
-            else {
-                resourceFile = new File(resourceFile, subDir);
-            }
+        File resourceDirectory = getWorkingDir();
+        String[] dirs = split(metaData.getSymbolicName());
+        for (int i = 0; i < (dirs.length - 1); i++) {
+            String subDir = dirs[i];
+            resourceDirectory = new File(resourceDirectory, subDir);
         }
-        if (!resourceFile.exists() && !resourceFile.mkdirs()) {
+        if (!resourceDirectory.exists() && !resourceDirectory.mkdirs()) {
             throw new IOException("Failed to create store directory");
         }
-        
-        if (metaData.getExtension() != null && !metaData.getExtension().equals("")) {
-            resourceFile = new File(resourceFile, metaData.getSymbolicName() + "-" + metaData.getVersion() + "." + metaData.getExtension());
+
+        String name = metaData.getSymbolicName();
+        String version = metaData.getVersion();
+        if (version != null && !version.equals("") && !version.equals("0.0.0")) {
+            name += "-" + version;
         }
-        else {
-            resourceFile = new File(resourceFile, metaData.getSymbolicName() + "-" + metaData.getVersion());
+        String extension = metaData.getExtension();
+        if (extension != null && !extension.equals("")) {
+            name += "." + extension;
         }
-        return resourceFile;
+        return new File(resourceDirectory, name);
+    }
+
+    /**
+     * Splits a name into parts, breaking at all dots as long as what's behind the dot resembles a Java package name
+     * (ie. it starts with a lowercase character).
+     * 
+     * @param name
+     *            the name to split
+     * @return an array of parts
+     */
+    public static String[] split(String name) {
+        List<String> result = new ArrayList<>();
+        int startPos = 0;
+        for (int i = 0; i < (name.length() - 1); i++) {
+            if (name.charAt(i) == '.') {
+                if (Character.isLowerCase(name.charAt(i + 1))) {
+                    result.add(name.substring(startPos, i));
+                    i++;
+                    startPos = i;
+                }
+                else {
+                    break;
+                }
+            }
+        }
+        result.add(name.substring(startPos));
+        return result.toArray(new String[result.size()]);
     }
 
     /**
      * @return the working directory of this file store.
      */
     private File getWorkingDir() {
-        return m_dir;
+        synchronized (m_lock) {
+            return m_dir;
+        }
     }
 
     /**
      * Moves a given source file to a destination location, effectively resulting in a rename.
      * 
-     * @param source the source file to move;
-     * @param dest the destination file to move the file to.
+     * @param source
+     *            the source file to move;
+     * @param dest
+     *            the destination file to move the file to.
      * @return <code>true</code> if the move succeeded.
-     * @throws IOException in case of I/O problems.
+     * @throws IOException
+     *             in case of I/O problems.
      */
     private boolean moveFile(File source, File dest) throws IOException {
         final int bufferSize = 1024 * 1024; // 1MB
@@ -421,7 +417,8 @@ public class BundleFileStore implements BundleStore, ManagedService {
     /**
      * Safely closes a given resource, ignoring any I/O exceptions that might occur by this.
      * 
-     * @param resource the resource to close, can be <code>null</code>.
+     * @param resource
+     *            the resource to close, can be <code>null</code>.
      */
     private void closeQuietly(Closeable resource) {
         try {
@@ -437,39 +434,12 @@ public class BundleFileStore implements BundleStore, ManagedService {
     /**
      * Creates a {@link File} object with the given file name in the current working directory.
      * 
-     * @param fileName the name of the file.
+     * @param fileName
+     *            the name of the file.
      * @return a {@link File} object, never <code>null</code>.
      * @see #getWorkingDir()
      */
     private File createFile(String fileName) {
         return new File(getWorkingDir(), fileName);
-    }
-    
-    /**
-     * Wrapper that holds resource meta-data relevant to the store layout.
-     *
-     */
-    static class ResourceMetaData {
-        private final String m_bundleSymbolicName;
-        private final String m_version;
-        private final String m_extension;
-        
-        public ResourceMetaData(String bundleSymbolicName, String version, String extension) {
-            m_bundleSymbolicName = bundleSymbolicName;
-            m_version = version;
-            m_extension = extension;
-        }
-        
-        public String getSymbolicName() {
-            return m_bundleSymbolicName;
-        }
-        
-        public String getVersion() {
-            return m_version;
-        }
-        
-        public String getExtension() {
-            return m_extension;
-        }
     }
 }

@@ -18,7 +18,7 @@
  */
 package org.apache.ace.client.repository.helper.bundle.impl;
 
-import static org.apache.ace.test.utils.TestUtils.UNIT;
+import static org.testng.Assert.*;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -46,23 +46,22 @@ public class BundleHelperTest {
         m_helper = new BundleHelperImpl();
     }
 
-    @Test(groups = { UNIT })
+    @Test()
     public void testMimetype() {
-        assert m_helper.canHandle("application/vnd.osgi.bundle") : "Should be able to handle bundle mimetype.";
-        assert !m_helper.canHandle("somecrazy/mimetype") : "Should not be able to handle crazy mimetype.";
+        assertTrue(m_helper.canHandle("application/vnd.osgi.bundle"), "Should be able to handle bundle mimetype.");
+        assertFalse(m_helper.canHandle("somecrazy/mimetype"), "Should not be able to handle crazy mimetype.");
     }
 
-    @Test(groups = { UNIT })
+    @Test()
     public void testManifestExtraction() {
         ArtifactResource artifact = new ArtifactResource() {
-
             @Override
             public InputStream openStream() throws IOException {
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 Manifest manifest = new Manifest();
                 Attributes attrs = manifest.getMainAttributes();
                 attrs.putValue("Manifest-Version", "1");
-                attrs.putValue("Bundle-SymbolicName", "mybundle");
+                attrs.putValue("Bundle-SymbolicName", "mybundle;singleton:=true");
                 attrs.putValue("Bundle-Version", "1.0.0");
                 attrs.putValue("Bundle-Name", "My Cool Bundle");
                 JarOutputStream jos = new JarOutputStream(baos, manifest);
@@ -71,27 +70,31 @@ public class BundleHelperTest {
             }
 
             @Override
+            public long getSize() throws IOException {
+                return -1L;
+            }
+
+            @Override
             public URL getURL() {
                 return null;
             }
         };
         Map<String, String> map = m_helper.extractMetaData(artifact);
-        assert "mybundle".equals(map.get("Bundle-SymbolicName")) : "Symbolic name should have been 'mybundle', was " + map.get("Bundle-SymbolicName");
-        assert "1.0.0".equals(map.get("Bundle-Version")) : "Version should have been '1.0.0', was " + map.get("Bundle-Version");
-        assert "My Cool Bundle-1.0.0".equals(map.get(ArtifactObject.KEY_ARTIFACT_NAME)) : "Artifact name should have been 'My Cool Bundle-1.0.0', was " + map.get(ArtifactObject.KEY_ARTIFACT_NAME);
+        assertEquals(map.get("Bundle-SymbolicName"), "mybundle");
+        assertEquals(map.get("Bundle-Version"), "1.0.0");
+        assertEquals(map.get(ArtifactObject.KEY_ARTIFACT_NAME), "My Cool Bundle-1.0.0");
     }
 
-    @Test(groups = { UNIT })
+    @Test()
     public void testLocalizedManifestExtraction() {
         ArtifactResource artifact = new ArtifactResource() {
-
             @Override
             public InputStream openStream() throws IOException {
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 Manifest manifest = new Manifest();
                 Attributes attrs = manifest.getMainAttributes();
                 attrs.putValue("Manifest-Version", "1");
-                attrs.putValue("Bundle-SymbolicName", "mybundle");
+                attrs.putValue("Bundle-SymbolicName", "mybundle;qux:=quu");
                 attrs.putValue("Bundle-Version", "1.0.0");
                 attrs.putValue("Bundle-Name", "%bundleName");
                 attrs.putValue("Bundle-Localization", "locale");
@@ -111,23 +114,25 @@ public class BundleHelperTest {
             }
 
             @Override
+            public long getSize() throws IOException {
+                return -1L;
+            }
+
+            @Override
             public URL getURL() {
                 return null;
             }
         };
         Map<String, String> map = m_helper.extractMetaData(artifact);
-        assert "mybundle".equals(map.get("Bundle-SymbolicName")) : "Symbolic name should have been 'mybundle', was " + map.get("Bundle-SymbolicName");
-        assert "1.0.0".equals(map.get("Bundle-Version")) : "Version should have been '1.0.0', was " + map.get("Bundle-Version");
-        assert "The Coolest Bundle-1.0.0".equals(map.get(ArtifactObject.KEY_ARTIFACT_NAME)) : "Artifact name should have been 'The Coolest Bundle-1.0.0', was " + map.get(ArtifactObject.KEY_ARTIFACT_NAME);
+        assertEquals(map.get("Bundle-SymbolicName"), "mybundle");
+        assertEquals(map.get("Bundle-Version"), "1.0.0");
+        assertEquals(map.get(ArtifactObject.KEY_ARTIFACT_NAME), "The Coolest Bundle-1.0.0");
     }
 
-    @Test(groups = { UNIT })
+    @Test()
     public void testLocalizedManifestExtractionWithDefaultBase() {
-
         // note that we do not set the Bundle-Localization header
-
         ArtifactResource artifact = new ArtifactResource() {
-
             @Override
             public InputStream openStream() throws IOException {
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -147,20 +152,24 @@ public class BundleHelperTest {
             }
 
             @Override
+            public long getSize() throws IOException {
+                return -1L;
+            }
+
+            @Override
             public URL getURL() {
                 return null;
             }
         };
         Map<String, String> map = m_helper.extractMetaData(artifact);
-        assert "mybundle".equals(map.get("Bundle-SymbolicName")) : "Symbolic name should have been 'mybundle', was " + map.get("Bundle-SymbolicName");
-        assert "1.0.0".equals(map.get("Bundle-Version")) : "Version should have been '1.0.0', was " + map.get("Bundle-Version");
-        assert "The Coolest Bundle-1.0.0".equals(map.get(ArtifactObject.KEY_ARTIFACT_NAME)) : "Artifact name should have been 'The Coolest Bundle-1.0.0', was " + map.get(ArtifactObject.KEY_ARTIFACT_NAME);
+        assertEquals(map.get("Bundle-SymbolicName"), "mybundle");
+        assertEquals(map.get("Bundle-Version"), "1.0.0");
+        assertEquals(map.get(ArtifactObject.KEY_ARTIFACT_NAME), "The Coolest Bundle-1.0.0");
     }
 
-    @Test(groups = { UNIT })
+    @Test()
     public void testLocalizedManifestExtractionWithLocale() {
         ArtifactResource artifact = new ArtifactResource() {
-
             @Override
             public InputStream openStream() throws IOException {
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -181,20 +190,25 @@ public class BundleHelperTest {
             }
 
             @Override
+            public long getSize() throws IOException {
+                return -1L;
+            }
+
+            @Override
             public URL getURL() {
                 return null;
             }
         };
         Map<String, String> map = m_helper.extractMetaData(artifact);
-        assert "mybundle".equals(map.get("Bundle-SymbolicName")) : "Symbolic name should have been 'mybundle', was " + map.get("Bundle-SymbolicName");
-        assert "1.0.0".equals(map.get("Bundle-Version")) : "Version should have been '1.0.0', was " + map.get("Bundle-Version");
-        assert "De koelste Bundle-1.0.0".equals(map.get(ArtifactObject.KEY_ARTIFACT_NAME)) : "Artifact name should have been 'The Coolest Bundle-1.0.0', was " + map.get(ArtifactObject.KEY_ARTIFACT_NAME);
+        assertEquals(map.get("Bundle-SymbolicName"), "mybundle");
+        assertEquals(map.get("Bundle-Name"), "De koelste Bundle");
+        assertEquals(map.get("Bundle-Version"), "1.0.0");
+        assertEquals(map.get(ArtifactObject.KEY_ARTIFACT_NAME), "De koelste Bundle-1.0.0");
     }
 
-    @Test(groups = { UNIT })
+    @Test()
     public void testLocalizedManifestExtractionWithLocaleOverrule() {
         ArtifactResource artifact = new ArtifactResource() {
-
             @Override
             public InputStream openStream() throws IOException {
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -224,13 +238,18 @@ public class BundleHelperTest {
             }
 
             @Override
+            public long getSize() throws IOException {
+                return -1L;
+            }
+
+            @Override
             public URL getURL() {
                 return null;
             }
         };
         Map<String, String> map = m_helper.extractMetaData(artifact);
-        assert "mybundle".equals(map.get("Bundle-SymbolicName")) : "Symbolic name should have been 'mybundle', was " + map.get("Bundle-SymbolicName");
-        assert "1.0.0".equals(map.get("Bundle-Version")) : "Version should have been '1.0.0', was " + map.get("Bundle-Version");
-        assert "The Coolest Bundle-1.0.0".equals(map.get(ArtifactObject.KEY_ARTIFACT_NAME)) : "Artifact name should have been 'The Coolest Bundle-1.0.0', was " + map.get(ArtifactObject.KEY_ARTIFACT_NAME);
+        assertEquals(map.get("Bundle-SymbolicName"), "mybundle");
+        assertEquals(map.get("Bundle-Version"), "1.0.0");
+        assertEquals(map.get(ArtifactObject.KEY_ARTIFACT_NAME), "The Coolest Bundle-1.0.0");
     }
 }

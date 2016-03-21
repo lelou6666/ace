@@ -1,0 +1,51 @@
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
+-buildpath: \
+	osgi.core;version=4.3,\
+	org.apache.ace.agent;version=latest,\
+	org.apache.ace.builder;version=latest,\
+	org.apache.ace.test;version=latest,\
+	org.apache.felix.dependencymanager,\
+	org.apache.felix.http.jetty;version='[2.2,3)',\
+	javax.servlet,\
+	junit.osgi
+
+-runfw: org.apache.felix.framework;version='[4,5)'
+-runbundles: \
+	org.apache.ace.test;version=latest,\
+	org.apache.ace.builder;version=latest,\
+	org.apache.felix.configadmin,\
+	org.apache.felix.dependencymanager,\
+	org.apache.felix.http.jetty;version='[2.2,3)',\
+	org.apache.felix.log,\
+	osgi.cmpn
+-runvm: -ea
+-runee: JavaSE-1.7
+-runsystempackages: sun.reflect
+-runproperties: ${itestrunprops}
+-baseline:
+
+Test-Cases: ${classes;CONCRETE;EXTENDS;org.apache.ace.it.IntegrationTestBase}
+
+Private-Package: \
+	org.apache.ace.range,\
+	org.apache.ace.agent,\
+	org.apache.ace.agent.impl,\
+	org.apache.ace.agent.itest,\
+	org.apache.ace.agent.updater,\
+	org.apache.ace.feedback,\
+	org.apache.ace.feedback.util,\
+	org.apache.felix.deploymentadmin,\
+	org.apache.felix.deploymentadmin.spi,\
+	org.osgi.service.event,\
+	org.osgi.service.log,\
+	org.osgi.util.tracker
+
+Import-Package: \
+	!org.osgi.service.component.annotations,\
+	!org.apache.tools.ant.*,\
+	!aQute.*,\
+	*
+Bundle-Version: 1.0.0
+Bundle-Name: Apache ACE Agent Custom Controller itest
+Bundle-Category: itest

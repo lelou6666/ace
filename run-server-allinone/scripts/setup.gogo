@@ -1,0 +1,54 @@
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+#
+# Sets up a workspace with a collection of entities for testing.
+#
+
+# install test bundle with additional Gogo commands needed later on in this script
+pwd = (cd) getAbsolutePath
+start 'file:'$pwd'/../org.apache.ace.test/generated/org.apache.ace.test.jar'
+
+# create a workspace
+w = (cw)
+
+# upload resource processor
+$w ca 'file:'$pwd'/../cnf/localrepo/org.apache.felix.deployment.rp.autoconf/org.apache.felix.deployment.rp.autoconf-0.1.8.jar' true
+
+# create 10 features, distributions and targets...
+each [0 1 2 3 4 5 6 7 8 9] {
+	a = $it
+	
+	echo 'Creating feature, distribution and target '$a' ...'
+	$w cf 'feature-'$it
+	$w cd 'dist-'$it
+	($w ct [id='target-'$a] [common=value 'prop'$a'1'=foo 'prop'$a'2'=bar 'prop'$a'3'=qux]) setautoapprove true
+	$w cf2d '(name=feature-'$a')' '(name=dist-'$a')'
+	$w cd2t '(name=dist-'$a')' '(id=target-'$a')'
+}
+
+# create 1000 artifacts and link them to the 10 features...
+a = 0
+while {(lt $a 100)} {
+	each [0 1 2 3 4 5 6 7 8 9] {
+		echo 'Creating bundle artifact-'$a$it' ...'
+		# generate artifacts and associate them
+        $w ca (gba 'artifact-'$it'-'$a) true
+		$w ca2f '(Bundle-SymbolicName=artifact-'$it'-'$a')' '(name=feature-'$it')'
+	}
+	a = (inc $a)
+}
+
+# create 100 metatype configurations and link them to the 10 features...
+a = 0
+while {(lt $a 10)} {
+	each [0 1 2 3 4 5 6 7 8 9] {
+		echo 'Creating config-'$it'-'$a'.xml ...'
+		c = (gca 'config-'$it'-'$a 'common' 'prop'$it'1' 'prop'$it'2' 'prop'$it'3')
+		$w ca $c true
+		$w ca2f '(artifactName=config-'$it'-'$a'.xml)' '(name=feature-'$it')'
+	}
+    a = (inc $a)
+}
+
+# commit and delete the workspace
+$w commit
+rw $w

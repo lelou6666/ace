@@ -29,6 +29,8 @@ import org.osgi.framework.wiring.BundleCapability;
 import org.osgi.framework.wiring.BundleRequirement;
 import org.osgi.framework.wiring.BundleRevision;
 import org.osgi.framework.wiring.BundleWiring;
+import org.osgi.resource.Capability;
+import org.osgi.resource.Requirement;
 
 class HostBundleRevision implements BundleRevision
 {
@@ -67,7 +69,7 @@ class HostBundleRevision implements BundleRevision
     {
         if (m_cachedCapabilities == null)
         {
-            List<BundleCapability> caps = new ArrayList<BundleCapability>();
+            List<BundleCapability> caps = new ArrayList<>();
 
             // Wrap host capabilities.
             for (BundleCapability cap : m_host.getDeclaredCapabilities(null))
@@ -93,11 +95,15 @@ class HostBundleRevision implements BundleRevision
         return m_cachedCapabilities;
     }
 
+    public List<Capability> getCapabilities(String namespace) {
+        return new ArrayList<>(getCapabilities(namespace));
+    }
+    
     public List<BundleRequirement> getDeclaredRequirements(String namespace)
     {
         if (m_cachedRequirements == null)
         {
-            List<BundleRequirement> reqs = new ArrayList<BundleRequirement>();
+            List<BundleRequirement> reqs = new ArrayList<>();
 
             // Wrap host requirements.
             for (BundleRequirement req : m_host.getDeclaredRequirements(null))
@@ -122,6 +128,10 @@ class HostBundleRevision implements BundleRevision
             m_cachedRequirements = Collections.unmodifiableList(reqs);
         }
         return m_cachedRequirements;
+    }
+    
+    public List<Requirement> getRequirements(String namespace) {
+        return new ArrayList<Requirement>(getDeclaredRequirements(namespace));
     }
 
     public int getTypes()

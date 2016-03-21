@@ -19,14 +19,13 @@
 package org.apache.ace.webui.domain;
 
 public class OBREntry {
-	
     private final String m_name;
     private final String m_symbolicName;
     private final String m_version;
     private final String m_uri;
 
     public OBREntry(String name, String symbolicName, String version, String uri) {
-    	m_name = name;
+        m_name = name;
         m_symbolicName = symbolicName;
         m_version = version;
         m_uri = uri;

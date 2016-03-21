@@ -58,8 +58,7 @@ class RepositorySet {
 
     private final User m_user;
     private final Preferences m_prefs;
-    @SuppressWarnings("unchecked")
-    private final ObjectRepositoryImpl[] m_repos;
+    private final ObjectRepositoryImpl<?, ?>[] m_repos;
     private final CachedRepository m_repository;
     private final String m_name;
     private final boolean m_writeAccess;
@@ -67,13 +66,12 @@ class RepositorySet {
     private final ChangeNotifier m_notifier;
     private final LogService m_log;
     
-    private volatile ServiceRegistration m_modifiedHandler;
+    private volatile ServiceRegistration<EventHandler> m_modifiedHandler;
 
     /* ********
      * Basics
      * ********/
 
-    @SuppressWarnings("unchecked")
     /**
      * Creates a new <code>RepositorySet</code>. Notes:
      * <ul>
@@ -82,8 +80,8 @@ class RepositorySet {
      * that endpoints of an association are available at the time of deserialization.</li>
      * </ul>
      */
-    RepositorySet(ChangeNotifier notifier, LogService log, User user, Preferences prefs, ObjectRepositoryImpl[] repos, CachedRepository repository, String name, boolean writeAccess) {
-        m_workingState = new ConcurrentHashMap<RepositoryObject, WorkingState>();
+    RepositorySet(ChangeNotifier notifier, LogService log, User user, Preferences prefs, ObjectRepositoryImpl<?, ?>[] repos, CachedRepository repository, String name, boolean writeAccess) {
+        m_workingState = new ConcurrentHashMap<>();
         m_notifier = notifier;
         m_log = log;
         m_user = user;
@@ -116,8 +114,7 @@ class RepositorySet {
         return m_user;
     }
 
-    @SuppressWarnings("unchecked")
-    ObjectRepositoryImpl[] getRepos() {
+    ObjectRepositoryImpl<?, ?>[] getRepos() {
         return m_repos;
     }
 
@@ -153,7 +150,7 @@ class RepositorySet {
      */
     void loadPreferences() {
         Preferences workingNode = m_prefs.node(PREFS_LOCAL_WORKING_STATE);
-        Map<String, WorkingState> entries = new HashMap<String, WorkingState>();
+        Map<String, WorkingState> entries = new HashMap<>();
         // First, get all nodes and their workingstate.
         try {
             String defaultWorkingState = WorkingState.Unchanged.toString();
@@ -170,7 +167,7 @@ class RepositorySet {
         }
         // Then, go through all objects and check whether they match a definition we know.
         // This prevents calling getDefinition more than once per object.
-        for (ObjectRepository<RepositoryObject> repo : m_repos) {
+        for (ObjectRepository<?> repo : m_repos) {
             for (RepositoryObject o : repo.get()) {
                 WorkingState state = entries.get(o.getDefinition());
                 if (state != null) {
@@ -186,7 +183,7 @@ class RepositorySet {
 
     boolean readLocal() throws IOException {
         InputStream input = m_repository.getLocal(false /* fail */);
-        if (input.available() > 0) {
+        if (input != null && input.available() > 0) {
             read(input);
             return true;
         }
@@ -247,20 +244,19 @@ class RepositorySet {
         return m_repository.isCurrent();
     }
 
-    @SuppressWarnings("unchecked")
     void clearRepositories() {
-        for (ObjectRepositoryImpl repo : getRepos()) {
+        for (ObjectRepositoryImpl<?, ?> repo : getRepos()) {
             repo.setBusy(true);
         }
 
         try {
-            for (ObjectRepositoryImpl repo : getRepos()) {
+            for (ObjectRepositoryImpl<?, ?> repo : getRepos()) {
                 repo.removeAll();
             }
         }
         finally {
             // Ensure all busy flags are reset at all times...
-            for (ObjectRepositoryImpl repo : getRepos()) {
+            for (ObjectRepositoryImpl<?, ?> repo : getRepos()) {
                 repo.setBusy(false);
             }
         }
@@ -284,10 +280,10 @@ class RepositorySet {
         if (m_modifiedHandler != null) {
             throw new IllegalStateException("A handler is already registered; only one can be used at a time.");
         }
-        Dictionary topic = new Hashtable();
+        Dictionary<String, Object> topic = new Hashtable<>();
         topic.put(EventConstants.EVENT_TOPIC, topics);
         topic.put(EventConstants.EVENT_FILTER, "(" + SessionFactory.SERVICE_SID + "=" + sessionID + ")");
-        m_modifiedHandler = context.registerService(EventHandler.class.getName(), new ModifiedHandler(), topic);
+        m_modifiedHandler = context.registerService(EventHandler.class, new ModifiedHandler(), topic);
     }
 
     WorkingState getWorkingState(RepositoryObject object) {

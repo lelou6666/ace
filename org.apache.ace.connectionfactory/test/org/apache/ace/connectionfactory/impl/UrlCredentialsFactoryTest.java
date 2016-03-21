@@ -19,9 +19,8 @@
 
 package org.apache.ace.connectionfactory.impl;
 
-import static org.apache.ace.test.utils.TestUtils.UNIT;
-
-import java.util.Properties;
+import java.util.Dictionary;
+import java.util.Hashtable;
 
 import org.apache.ace.connectionfactory.impl.UrlCredentialsFactory.MissingValueException;
 import org.testng.annotations.Test;
@@ -30,14 +29,17 @@ import org.testng.annotations.Test;
  * Test cases for {@link UrlCredentialsFactory}.
  */
 public class UrlCredentialsFactoryTest {
+    /** any valid URL will do, no actual connections will be opened to this URL. */
+    private static final String AUTH_BASE_URL = "http://localhost/";
 
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.UrlCredentialsFactory#getCredentials(java.util.Dictionary)}.
      */
-    @Test(groups = { UNIT }, expectedExceptions = MissingValueException.class)
+    @Test(expectedExceptions = MissingValueException.class)
     public void testGetCredentialsWithDictionaryBasicTypeMissingPasswordFail() {
-        Properties props = new Properties();
-        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, "http://localhost:8080/");
+        Dictionary<String, Object> props = new Hashtable<>();
+
+        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, AUTH_BASE_URL);
         props.put(UrlCredentialsFactory.KEY_AUTH_TYPE, "basic");
         props.put(UrlCredentialsFactory.KEY_AUTH_USER_NAME, "bar");
 
@@ -47,10 +49,11 @@ public class UrlCredentialsFactoryTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.UrlCredentialsFactory#getCredentials(java.util.Dictionary)}.
      */
-    @Test(groups = { UNIT }, expectedExceptions = MissingValueException.class)
+    @Test(expectedExceptions = MissingValueException.class)
     public void testGetCredentialsWithDictionaryClientCertTypeMissingKeystorePasswordFail() {
-        Properties props = new Properties();
-        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, "http://localhost:8080/");
+        Dictionary<String, Object> props = new Hashtable<>();
+
+        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, AUTH_BASE_URL);
         props.put(UrlCredentialsFactory.KEY_AUTH_TYPE, "client_cert");
         props.put(UrlCredentialsFactory.KEY_AUTH_TRUSTSTORE_FILE, "bar");
         props.put(UrlCredentialsFactory.KEY_AUTH_TRUSTSTORE_PASS, "qux");
@@ -62,10 +65,11 @@ public class UrlCredentialsFactoryTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.UrlCredentialsFactory#getCredentials(java.util.Dictionary)}.
      */
-    @Test(groups = { UNIT }, expectedExceptions = MissingValueException.class)
+    @Test(expectedExceptions = MissingValueException.class)
     public void testGetCredentialsWithDictionaryClientCertTypeMissingKeystoreFileFail() {
-        Properties props = new Properties();
-        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, "http://localhost:8080/");
+        Dictionary<String, Object> props = new Hashtable<>();
+
+        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, AUTH_BASE_URL);
         props.put(UrlCredentialsFactory.KEY_AUTH_TYPE, "client_cert");
         props.put(UrlCredentialsFactory.KEY_AUTH_TRUSTSTORE_FILE, "bar");
         props.put(UrlCredentialsFactory.KEY_AUTH_TRUSTSTORE_PASS, "qux");
@@ -77,10 +81,11 @@ public class UrlCredentialsFactoryTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.UrlCredentialsFactory#getCredentials(java.util.Dictionary)}.
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void testGetCredentialsWithDictionaryClientCertTypeOk() {
-        Properties props = new Properties();
-        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, "http://localhost:8080/");
+        Dictionary<String, Object> props = new Hashtable<>();
+
+        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, AUTH_BASE_URL);
         props.put(UrlCredentialsFactory.KEY_AUTH_TYPE, "client_cert");
         props.put(UrlCredentialsFactory.KEY_AUTH_TRUSTSTORE_FILE, "foo");
         props.put(UrlCredentialsFactory.KEY_AUTH_TRUSTSTORE_PASS, "bar");
@@ -98,10 +103,11 @@ public class UrlCredentialsFactoryTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.UrlCredentialsFactory#getCredentials(java.util.Dictionary)}.
      */
-    @Test(groups = { UNIT }, expectedExceptions = MissingValueException.class)
+    @Test(expectedExceptions = MissingValueException.class)
     public void testGetCredentialsWithDictionaryClientCertTypeMissingTruststorePasswordFail() {
-        Properties props = new Properties();
-        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, "http://localhost:8080/");
+        Dictionary<String, Object> props = new Hashtable<>();
+
+        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, AUTH_BASE_URL);
         props.put(UrlCredentialsFactory.KEY_AUTH_TYPE, "client_cert");
         props.put(UrlCredentialsFactory.KEY_AUTH_KEYSTORE_FILE, "bar");
         props.put(UrlCredentialsFactory.KEY_AUTH_KEYSTORE_PASS, "qux");
@@ -113,10 +119,11 @@ public class UrlCredentialsFactoryTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.UrlCredentialsFactory#getCredentials(java.util.Dictionary)}.
      */
-    @Test(groups = { UNIT }, expectedExceptions = MissingValueException.class)
+    @Test(expectedExceptions = MissingValueException.class)
     public void testGetCredentialsWithDictionaryClientCertTypeMissingTruststoreFileFail() {
-        Properties props = new Properties();
-        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, "http://localhost:8080/");
+        Dictionary<String, Object> props = new Hashtable<>();
+
+        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, AUTH_BASE_URL);
         props.put(UrlCredentialsFactory.KEY_AUTH_TYPE, "client_cert");
         props.put(UrlCredentialsFactory.KEY_AUTH_KEYSTORE_FILE, "bar");
         props.put(UrlCredentialsFactory.KEY_AUTH_KEYSTORE_PASS, "qux");
@@ -128,10 +135,11 @@ public class UrlCredentialsFactoryTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.UrlCredentialsFactory#getCredentials(java.util.Dictionary)}.
      */
-    @Test(groups = { UNIT }, expectedExceptions = MissingValueException.class)
+    @Test(expectedExceptions = MissingValueException.class)
     public void testGetCredentialsWithDictionaryBasicTypeMissingUserNameFail() {
-        Properties props = new Properties();
-        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, "http://localhost:8080/");
+        Dictionary<String, Object> props = new Hashtable<>();
+
+        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, AUTH_BASE_URL);
         props.put(UrlCredentialsFactory.KEY_AUTH_TYPE, "basic");
         props.put(UrlCredentialsFactory.KEY_AUTH_USER_PASSWORD, "bar");
 
@@ -141,10 +149,11 @@ public class UrlCredentialsFactoryTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.UrlCredentialsFactory#getCredentials(java.util.Dictionary)}.
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void testGetCredentialsWithDictionaryBasicTypeOk() {
-        Properties props = new Properties();
-        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, "http://localhost:8080/");
+        Dictionary<String, Object> props = new Hashtable<>();
+
+        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, AUTH_BASE_URL);
         props.put(UrlCredentialsFactory.KEY_AUTH_TYPE, "basic");
         props.put(UrlCredentialsFactory.KEY_AUTH_USER_NAME, "foo");
         props.put(UrlCredentialsFactory.KEY_AUTH_USER_PASSWORD, "bar");
@@ -155,10 +164,11 @@ public class UrlCredentialsFactoryTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.UrlCredentialsFactory#getCredentials(java.util.Dictionary)}.
      */
-    @Test(groups = { UNIT }, expectedExceptions = IllegalArgumentException.class)
+    @Test(expectedExceptions = IllegalArgumentException.class)
     public void testGetCredentialsWithDictionaryInvalidAuthTypeFail() {
-        Properties props = new Properties();
-        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, "http://localhost:8080/");
+        Dictionary<String, Object> props = new Hashtable<>();
+
+        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, AUTH_BASE_URL);
         props.put(UrlCredentialsFactory.KEY_AUTH_TYPE, "nonsense");
 
         UrlCredentialsFactory.getCredentials(props);
@@ -167,9 +177,10 @@ public class UrlCredentialsFactoryTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.UrlCredentialsFactory#getCredentials(java.util.Dictionary)}.
      */
-    @Test(groups = { UNIT }, expectedExceptions = MissingValueException.class)
+    @Test(expectedExceptions = MissingValueException.class)
     public void testGetCredentialsWithDictionaryMissingBaseUrlFail() {
-        Properties props = new Properties();
+        Dictionary<String, Object> props = new Hashtable<>();
+
         props.put(UrlCredentialsFactory.KEY_AUTH_TYPE, "none");
 
         UrlCredentialsFactory.getCredentials(props);
@@ -178,7 +189,7 @@ public class UrlCredentialsFactoryTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.UrlCredentialsFactory#getCredentials(java.util.Dictionary)}.
      */
-    @Test(groups = { UNIT }, expectedExceptions = IllegalArgumentException.class)
+    @Test(expectedExceptions = IllegalArgumentException.class)
     public void testGetCredentialsWithNullDictionaryFail() {
         UrlCredentialsFactory.getCredentials(null);
     }
@@ -186,18 +197,19 @@ public class UrlCredentialsFactoryTest {
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.UrlCredentialsFactory#getCredentials(java.util.Dictionary, java.lang.String)}.
      */
-    @Test(groups = { UNIT }, expectedExceptions = IllegalArgumentException.class)
+    @Test(expectedExceptions = IllegalArgumentException.class)
     public void testGetCredentialsWithNullPrefixFail() {
-        UrlCredentialsFactory.getCredentials(new Properties(), null);
+        UrlCredentialsFactory.getCredentials(new Hashtable<String, Object>(), null);
     }
 
     /**
      * Test method for {@link org.apache.ace.connectionfactory.impl.UrlCredentialsFactory#getCredentials(java.util.Dictionary)}.
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void testGetCredentialsWithValidDictionaryOk() {
-        Properties props = new Properties();
-        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, "http://localhost:8080/");
+        Dictionary<String, Object> props = new Hashtable<>();
+
+        props.put(UrlCredentialsFactory.KEY_AUTH_BASE_URL, AUTH_BASE_URL);
         props.put(UrlCredentialsFactory.KEY_AUTH_TYPE, "none");
 
         UrlCredentialsFactory.getCredentials(props);

@@ -18,17 +18,21 @@
  */
 package org.apache.ace.deployment.streamgenerator.impl;
 
-import static org.apache.ace.test.utils.TestUtils.BROKEN;
-import static org.apache.ace.test.utils.TestUtils.UNIT;
-import static org.ops4j.pax.swissbox.tinybundles.core.TinyBundles.newBundle;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertNotNull;
+import static org.testng.Assert.assertNull;
+import static org.testng.Assert.assertTrue;
+import static org.testng.Assert.fail;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.net.URLConnection;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -41,7 +45,9 @@ import org.apache.ace.connectionfactory.ConnectionFactory;
 import org.apache.ace.deployment.provider.DeploymentProvider;
 import org.apache.ace.deployment.util.test.TestProvider;
 import org.apache.ace.test.constants.TestConstants;
+import org.apache.ace.test.utils.FileUtils;
 import org.apache.ace.test.utils.TestUtils;
+import org.osgi.framework.Version;
 import org.osgi.service.log.LogService;
 import org.osgi.service.useradmin.User;
 import org.testng.annotations.BeforeTest;
@@ -51,6 +57,7 @@ import org.testng.annotations.Test;
  * Unit tests for the deployment admin stream.
  */
 public class StreamTest {
+    private static final Version V1_0_0 = new Version(1, 0, 0);
     private static final int COPY_BUFFER_SIZE = 4096;
 
     private StreamGeneratorImpl m_generator;
@@ -60,23 +67,10 @@ public class StreamTest {
     protected void setUp() throws Exception {
         m_generator = new StreamGeneratorImpl();
         m_provider = new TestProvider();
-        InputStream is = newBundle().build(); // TODO this is a very trivial bundle, put more data in?
-        File temp = File.createTempFile("bundle", "jar");
-        temp.deleteOnExit();
-        FileOutputStream fos = new FileOutputStream(temp);
-        byte[] buf = new byte[4096];
-        int b = is.read(buf);
-        while (b != -1) {
-            fos.write(buf, 0, b);
-            b = is.read(buf);
-        }
-        fos.close();
-        is.close();
-        URL url = temp.toURI().toURL();
-        
-        m_provider.addData("A1.jar", "A1", url, "1.0.0", true);
-        m_provider.addData("A2.jar", "A2", url, "1.0.0", false);
-        m_provider.addData("A3.jar", "A3", url, "1.0.0", true);
+
+        m_provider.addData("A1.jar", "A1", FileUtils.createEmptyBundle("org.apache.ace.test.bundle.A1", V1_0_0).toURI().toURL(), "1.0.0", true);
+        m_provider.addData("A2.jar", "A2", FileUtils.createEmptyBundle("org.apache.ace.test.bundle.A2", V1_0_0).toURI().toURL(), "1.0.0", false);
+        m_provider.addData("A3.jar", "A3", FileUtils.createEmptyBundle("org.apache.ace.test.bundle.A3", V1_0_0).toURI().toURL(), "1.0.0", true);
         TestUtils.configureObject(m_generator, DeploymentProvider.class, m_provider);
         TestUtils.configureObject(m_generator, LogService.class);
         TestUtils.configureObject(m_generator, ConnectionFactory.class, new MockConnectionFactory());
@@ -107,8 +101,7 @@ public class StreamTest {
                             }
                         }
                         catch (IOException e) {
-                            // TODO Auto-generated catch block
-                            e.printStackTrace();
+                            fail(e.getMessage());
                         }
                     }
                 }
@@ -128,8 +121,7 @@ public class StreamTest {
                             }
                         }
                         catch (IOException e) {
-                            // TODO Auto-generated catch block
-                            e.printStackTrace();
+                            fail(e.getMessage());
                         }
                     }
                 }
@@ -149,8 +141,7 @@ public class StreamTest {
                             }
                         }
                         catch (IOException e) {
-                            // TODO Auto-generated catch block
-                            e.printStackTrace();
+                            fail(e.getMessage());
                         }
                     }
                 }
@@ -170,8 +161,7 @@ public class StreamTest {
                             }
                         }
                         catch (IOException e) {
-                            // TODO Auto-generated catch block
-                            e.printStackTrace();
+                            fail(e.getMessage());
                         }
                     }
                 }
@@ -191,8 +181,7 @@ public class StreamTest {
                             }
                         }
                         catch (IOException e) {
-                            // TODO Auto-generated catch block
-                            e.printStackTrace();
+                            fail(e.getMessage());
                         }
                     }
                 }
@@ -215,8 +204,7 @@ public class StreamTest {
                             }
                         }
                         catch (IOException e) {
-                            // TODO Auto-generated catch block
-                            e.printStackTrace();
+                            fail(e.getMessage());
                         }
                     }
                 }
@@ -227,32 +215,41 @@ public class StreamTest {
     /**
      * The specification requires the stream to be readable by JarInputStream (114.3) so make sure it is.
      */
-    @Test(groups = { UNIT })
     public void isJarInputStreamReadable() throws Exception {
         isJarInputStreamReadable(new JarInputStream(m_generator.getDeploymentPackage("test", "1.0.0")), false);
         isJarInputStreamReadable(new JarInputStream(m_generator.getDeploymentPackage("test", "0.0.0", "1.0.0")), true);
     }
 
     private void isJarInputStreamReadable(JarInputStream jis, boolean fixPackage) throws Exception {
-        assert jis != null : "We should have got an input stream for this deployment package.";
+        assertNotNull(jis, "We should have got an input stream for this deployment package.");
+
         Manifest m = jis.getManifest();
-        assert m != null : "The stream should contain a valid manifest.";
+        assertNotNull(m, "The stream should contain a valid manifest.");
+
         Attributes att = m.getMainAttributes();
-        assert att.getValue("DeploymentPackage-SymbolicName").equals("test");
-        assert att.getValue("DeploymentPackage-Version").equals("1.0.0");
-        assert (fixPackage && att.getValue("DeploymentPackage-FixPack").equals("[0.0.0,1.0.0)")) || (att.getValue("DeploymentPackage-FixPack") == null);
-        HashSet<String> names = new HashSet<String>();
+        assertEquals(att.getValue("DeploymentPackage-SymbolicName"), "test");
+        assertEquals(att.getValue("DeploymentPackage-Version"), "1.0.0");
+
+        if (fixPackage) {
+            assertEquals(att.getValue("DeploymentPackage-FixPack"), "[0.0.0,1.0.0)");
+        }
+        else {
+            assertNull(att.getValue("DeploymentPackage-FixPack"));
+        }
+
+        HashSet<String> names = new HashSet<>();
         JarEntry e = jis.getNextJarEntry();
         while (e != null) {
             String name = e.getName();
             names.add(name);
+
             if (fixPackage && name.equals("A2.jar")) {
-                assert e.getAttributes().getValue("DeploymentPackage-Missing").equals("true");
+                assertEquals(e.getAttributes().getValue("DeploymentPackage-Missing"), "true");
             }
             // we could check the name here against the manifest
             // and make sure we actually get what was promised
             Attributes a = m.getAttributes(name);
-            assert a != null : "The stream should contain a named section for " + name + " in the manifest.";
+            assertNotNull(a, "The stream should contain a named section for " + name + " in the manifest.");
 
             byte[] buffer = new byte[COPY_BUFFER_SIZE];
             int bytes = jis.read(buffer);
@@ -264,52 +261,82 @@ public class StreamTest {
             e = jis.getNextJarEntry();
         }
         if (!fixPackage) {
-            assert names.size() == 3 : "The stream should have contained three resources.";
+            assertEquals(names.size(), 3, "The stream should have contained three resources.");
         }
         else {
-            assert names.size() == 2 : "The stream should have contained three resources";
+            assertEquals(names.size(), 2, "The stream should have contained three resources");
         }
-        assert names.contains("A1.jar") : "The stream should have contained a resource called A1.jar";
-        assert fixPackage ^ names.contains("A2.jar") : "The stream should have contained a resource called A2.jar";
-        assert names.contains("A3.jar") : "The stream should have contained a resource called A3.jar";
+        assertTrue(names.contains("A1.jar"), "The stream should have contained a resource called A1.jar");
+        assertTrue(fixPackage ^ names.contains("A2.jar"), "The stream should have contained a resource called A2.jar");
+        assertTrue(names.contains("A3.jar"), "The stream should have contained a resource called A3.jar");
     }
 
     /**
-     * Test reading 100 streams sequentially.
+     * Test reading many streams sequentially.
      */
-    @Test(groups = { UNIT, BROKEN })
-    public void hundredStreamsSequentially() throws Exception {
-        for (int i = 0; i < 100; i++) {
-            isJarInputStreamReadable();
+    @Test
+    public void manyStreamsSequentially() {
+        final int procs = Runtime.getRuntime().availableProcessors() + 1;
+        final int loopCount = 50;
+        final int totalReads = procs * loopCount;
+
+        final List<Exception> failures = new ArrayList<>();
+
+        for (int i = 0; i < totalReads; i++) {
+            try {
+                isJarInputStreamReadable();
+            }
+            catch (Exception exception) {
+                failures.add(exception);
+            }
         }
+
+        assertTrue(failures.isEmpty(), "Test failed: " + failures);
     }
 
-    private Exception m_failure;
-
     /**
-     * Test reading 100 streams concurrently.
+     * Test reading many streams concurrently.
      */
-    @Test(groups = { UNIT, BROKEN }) // marked broken after discussing it with Karl
-    public void hundredStreamsConcurrently() throws Exception {
-        ExecutorService e = Executors.newFixedThreadPool(5);
-        for (int i = 0; i < 10; i++) {
-            e.execute(new Runnable() {
-                public void run() {
-                    for (int i = 0; i < 10; i++) {
+    @Test
+    public void manyStreamsConcurrently() throws InterruptedException {
+        final int procs = Runtime.getRuntime().availableProcessors() + 1;
+        final int loopCount = 50;
+        final int totalReads = procs * loopCount;
+
+        final List<Exception> failures = new ArrayList<>();
+
+        final CountDownLatch startLatch = new CountDownLatch(1);
+        final CountDownLatch stopLatch = new CountDownLatch(totalReads);
+
+        ExecutorService e = Executors.newFixedThreadPool(procs);
+        for (int i = 0; i < procs; i++) {
+            e.submit(new Callable<Void>() {
+                public Void call() throws Exception {
+                    startLatch.await();
+
+                    for (int i = 0; i < loopCount; i++) {
                         try {
                             isJarInputStreamReadable();
+                            stopLatch.countDown();
                         }
                         catch (Exception e) {
-                            m_failure = e;
+                            failures.add(e);
                         }
                     }
+
+                    return null;
                 }
             });
         }
-        e.shutdown();
-        e.awaitTermination(10, TimeUnit.SECONDS);
 
-        assert m_failure == null : "Test failed: " + m_failure.getLocalizedMessage();
+        // Let all threads start at the same time...
+        startLatch.countDown();
+        assertTrue(stopLatch.await(10, TimeUnit.SECONDS), "Not all streams were properly read?!");
+
+        e.shutdown();
+        assertTrue(e.awaitTermination(10, TimeUnit.SECONDS));
+
+        assertTrue(failures.isEmpty(), "Test failed: " + failures);
     }
 
     /**
@@ -319,7 +346,7 @@ public class StreamTest {
         public URLConnection createConnection(URL url) throws IOException {
             return url.openConnection();
         }
-        
+
         public URLConnection createConnection(URL url, User user) throws IOException {
             return createConnection(url);
         }

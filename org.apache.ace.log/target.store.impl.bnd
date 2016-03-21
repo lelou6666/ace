@@ -1,6 +1,8 @@
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
 Private-Package: org.apache.ace.log.target.store.impl
 Bundle-Activator: org.apache.ace.log.target.store.impl.Activator
 Export-Package: org.apache.ace.log.target.store
-Bundle-Version: 1.0.0
+Bundle-Version: 2.0.2
 Bundle-Name: Apache ACE Log Target Store
 Bundle-Description: Registers a service factory for target log stores

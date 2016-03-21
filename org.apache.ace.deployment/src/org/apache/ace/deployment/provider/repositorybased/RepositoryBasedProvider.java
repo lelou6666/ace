@@ -32,15 +32,17 @@ import java.util.Dictionary;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.GZIPInputStream;
 
 import javax.xml.parsers.SAXParserFactory;
 
+import org.apache.ace.connectionfactory.ConnectionFactory;
 import org.apache.ace.deployment.provider.ArtifactData;
 import org.apache.ace.deployment.provider.DeploymentProvider;
+import org.apache.ace.deployment.provider.OverloadedException;
 import org.apache.ace.deployment.provider.impl.ArtifactDataImpl;
 import org.apache.ace.deployment.provider.repositorybased.BaseRepositoryHandler.XmlDeploymentArtifact;
-import org.apache.ace.connectionfactory.ConnectionFactory;
 import org.apache.ace.range.RangeIterator;
 import org.apache.ace.repository.Repository;
 import org.apache.ace.repository.ext.BackupRepository;
@@ -97,8 +99,12 @@ public class RepositoryBasedProvider implements DeploymentProvider, ManagedServi
     public static final String KEY_RESOURCE_PROCESSOR_PID = "Deployment-ProvidesResourceProcessor";
 
     public static final String MIMETYPE = "application/vnd.osgi.bundle";
-
     
+    /**
+     * Key, intended for configurations that specifies the maximum number of concurrent users for this repository provider.
+     */
+    private static final String MAXIMUM_NUMBER_OF_USERS = "MaximumNumberOfUsers";
+
     private volatile LogService m_log;
 
     /** This variable is volatile since it can be changed by the Updated() method. */
@@ -114,137 +120,168 @@ public class RepositoryBasedProvider implements DeploymentProvider, ManagedServi
     private final SAXParserFactory m_saxParserFactory;
     private final Map<String,List<String>> m_cachedVersionLists;
 
+    private final AtomicInteger m_usageCounter = new AtomicInteger();
+    /** Maximum number of concurrent users. Values <= 0 are used for unlimited users. */
+    private int m_maximumNumberOfUsers = 0;
+    /** The default backoff time for each new user over the limit */
+    private static final int BACKOFF_TIME_PER_USER = 5; 
+
     public RepositoryBasedProvider() {
         m_saxParserFactory = SAXParserFactory.newInstance();
-        m_cachedVersionLists = new LRUMap<String, List<String>>();
+        m_cachedVersionLists = new LRUMap<>();
     }
 
-    public List<ArtifactData> getBundleData(String targetId, String version) throws IllegalArgumentException, IOException {
+    public List<ArtifactData> getBundleData(String targetId, String version) throws OverloadedException, IllegalArgumentException, IOException {
         return getBundleData(targetId, null, version);
     }
 
-    public List<ArtifactData> getBundleData(String targetId, String versionFrom, String versionTo) throws IllegalArgumentException, IOException {
+    public List<ArtifactData> getBundleData(String targetId, String versionFrom, String versionTo) throws OverloadedException, IllegalArgumentException, IOException {
         try {
-            if (versionFrom != null) {
-                Version.parseVersion(versionFrom);
+            int concurrentUsers = m_usageCounter.incrementAndGet();
+            if (m_maximumNumberOfUsers != 0  && m_maximumNumberOfUsers < concurrentUsers) {
+                throw new OverloadedException("Too many users, maximum allowed = " + m_maximumNumberOfUsers + ", current = " + concurrentUsers,  (concurrentUsers - m_maximumNumberOfUsers) * BACKOFF_TIME_PER_USER);
             }
-            Version.parseVersion(versionTo);
-        }
-        catch (NumberFormatException nfe) {
-            throw new IllegalArgumentException(nfe);
-        }
 
-        InputStream input = null;
-        List<ArtifactData> dataVersionTo = null;
-        List<ArtifactData> dataVersionFrom = null;
-
-        List<XmlDeploymentArtifact>[] pairs = null;
-        try {
-            // ACE-240: do NOT allow local/remote repositories to be empty. If we're 
-            // asking for real artifacts, it means we must have a repository...
-            input = getRepositoryStream(true /* fail */);
-            if (versionFrom == null) {
-                pairs = getDeploymentArtifactPairs(input, targetId, new String[] { versionTo });
-            }
-            else {
-                pairs = getDeploymentArtifactPairs(input, targetId, new String[] { versionFrom, versionTo });
-            }
-        }
-        catch (IOException ioe) {
-            m_log.log(LogService.LOG_WARNING, "Problem parsing source version.", ioe);
-            throw ioe;
-        }
-        finally {
-            if (input != null) {
-                try {
-                    input.close();
+            try {
+                if (versionFrom != null) {
+                    Version.parseVersion(versionFrom);
                 }
-                catch (IOException e) {
-                    m_log.log(LogService.LOG_DEBUG, "Error closing stream", e);
-                }
+                Version.parseVersion(versionTo);
             }
-        }
+            catch (NumberFormatException nfe) {
+                throw new IllegalArgumentException(nfe);
+            }
 
-        if ((pairs != null) && (pairs.length > 1)) {
-            dataVersionFrom = getAllArtifactData(pairs[0]);
-            dataVersionTo = getAllArtifactData(pairs[1]);
-            Iterator<ArtifactData> it = dataVersionTo.iterator();
-            while (it.hasNext()) {
-                ArtifactDataImpl bundleDataVersionTo = (ArtifactDataImpl) it.next();
-                // see if there was previously a version of this bundle, and update the 'changed' property accordingly.
-                if (bundleDataVersionTo.isBundle()) {
-                    ArtifactData bundleDataVersionFrom = getArtifactData(bundleDataVersionTo.getSymbolicName(), dataVersionFrom);
-                    bundleDataVersionTo.setChanged(!bundleDataVersionTo.equals(bundleDataVersionFrom));
+            InputStream input = null;
+            List<ArtifactData> dataVersionTo = null;
+            List<ArtifactData> dataVersionFrom = null;
+
+            List<XmlDeploymentArtifact>[] pairs = null;
+            try {
+                // ACE-240: do NOT allow local/remote repositories to be empty. If we're 
+                // asking for real artifacts, it means we must have a repository...
+                input = getRepositoryStream(true /* fail */);
+                if (versionFrom == null) {
+                    pairs = getDeploymentArtifactPairs(input, targetId, new String[] { versionTo });
                 }
                 else {
-                    ArtifactData bundleDataVersionFrom = getArtifactData(bundleDataVersionTo.getUrl(), dataVersionFrom);
-                    bundleDataVersionTo.setChanged(bundleDataVersionFrom == null);
+                    pairs = getDeploymentArtifactPairs(input, targetId, new String[] { versionFrom, versionTo });
                 }
             }
-        }
-        else {
-            dataVersionTo = getAllArtifactData(pairs[0]);
-        }
+            catch (IOException ioe) {
+                m_log.log(LogService.LOG_WARNING, "Problem parsing source version.", ioe);
+                throw ioe;
+            }
+            finally {
+                if (input != null) {
+                    try {
+                        input.close();
+                    }
+                    catch (IOException e) {
+                        m_log.log(LogService.LOG_DEBUG, "Error closing stream", e);
+                    }
+                }
+            }
 
-        return dataVersionTo != null ? dataVersionTo : new ArrayList<ArtifactData>();
-    }
-
-    @SuppressWarnings("unchecked")
-    public List<String> getVersions(String targetId) throws IllegalArgumentException, IOException {
-    	// check if cache is up to date
-    	if (isCacheUpToDate()) {
-    		List<String> result = m_cachedVersionLists.get(targetId);
-    		if (result != null) {
-    			return result;
-    		}
-    	}
-    	else {
-    		m_cachedVersionLists.clear();
-    	}
-    	
-        List<String> stringVersionList = new ArrayList<String>();
-        InputStream input = null;
-
-        try {
-            // ACE-240: allow local/remote repositories to be empty; as the target 
-            // might be new & unregistered, it can have no repository yet... 
-            input = getRepositoryStream(false /* fail */);
-            List<Version> versionList = getAvailableVersions(input, targetId);
-            if (versionList.isEmpty()) {
-                m_log.log(LogService.LOG_DEBUG, "No versions found for target: " + targetId);
+            if ((pairs != null) && (pairs.length > 1)) {
+                dataVersionFrom = getAllArtifactData(pairs[0]);
+                dataVersionTo = getAllArtifactData(pairs[1]);
+                Iterator<ArtifactData> it = dataVersionTo.iterator();
+                while (it.hasNext()) {
+                    ArtifactDataImpl bundleDataVersionTo = (ArtifactDataImpl) it.next();
+                    // see if there was previously a version of this bundle, and update the 'changed' property accordingly.
+                    if (bundleDataVersionTo.isBundle()) {
+                        ArtifactData bundleDataVersionFrom = getArtifactData(bundleDataVersionTo.getSymbolicName(), dataVersionFrom);
+                        bundleDataVersionTo.setChanged(!bundleDataVersionTo.equals(bundleDataVersionFrom));
+                    }
+                    else {
+                        ArtifactData bundleDataVersionFrom = getArtifactData(bundleDataVersionTo.getUrl(), dataVersionFrom);
+                        bundleDataVersionTo.setChanged(bundleDataVersionFrom == null);
+                    }
+                }
             }
             else {
-                // now sort the list of versions and convert all values to strings.
-                Collections.sort(versionList);
-                Iterator<Version> it = versionList.iterator();
-                while (it.hasNext()) {
-                    String version = (it.next()).toString();
-                    stringVersionList.add(version);
-                }
+                dataVersionTo = getAllArtifactData(pairs[0]);
             }
-        }
-        catch (IllegalArgumentException iae) {
-            // just move on.
-        }
-        catch (IOException ioe) {
-            m_log.log(LogService.LOG_DEBUG, "Problem parsing DeploymentRepository", ioe);
-            throw ioe;
+
+            return dataVersionTo != null ? dataVersionTo : new ArrayList<ArtifactData>();
         }
         finally {
-            if (input != null) {
-                try {
-                    input.close();
-                }
-                catch (IOException e) {
-                    m_log.log(LogService.LOG_DEBUG, "Error closing stream", e);
+            m_usageCounter.getAndDecrement();
+        }
+    }
+
+    public List<String> getVersions(String targetId) throws OverloadedException, IllegalArgumentException, IOException {
+        try {
+            int concurrentUsers = m_usageCounter.incrementAndGet();
+            if (m_maximumNumberOfUsers != 0  && m_maximumNumberOfUsers < concurrentUsers) {
+                throw new OverloadedException("Too many users, maximum allowed = " + m_maximumNumberOfUsers + ", current = " + concurrentUsers,  (concurrentUsers - m_maximumNumberOfUsers) * BACKOFF_TIME_PER_USER);
+            }
+
+            // check if cache is up to date
+            if (isCacheUpToDate()) {
+                List<String> result = m_cachedVersionLists.get(targetId);
+                if (result != null) {
+                    return result;
                 }
             }
+            else {
+                m_cachedVersionLists.clear();
+            }
+
+            List<String> stringVersionList = new ArrayList<>();
+            InputStream input = null;
+
+            try {
+                // ACE-240: allow local/remote repositories to be empty; as the target 
+                // might be new & unregistered, it can have no repository yet... 
+                input = getRepositoryStream(false /* fail */);
+                List<Version> versionList;
+                if (input == null) {
+                    versionList = Collections.EMPTY_LIST;
+                }
+                else {
+                    versionList = getAvailableVersions(input, targetId);
+                }
+                if (versionList.isEmpty()) {
+                    m_log.log(LogService.LOG_DEBUG, "No versions found for target: " + targetId);
+                }
+                else {
+                    // now sort the list of versions and convert all values to strings.
+                    Collections.sort(versionList);
+                    Iterator<Version> it = versionList.iterator();
+                    while (it.hasNext()) {
+                        String version = (it.next()).toString();
+                        stringVersionList.add(version);
+                    }
+                }
+            }
+            catch (IllegalArgumentException iae) {
+                // just move on.
+            }
+            catch (IOException ioe) {
+                m_log.log(LogService.LOG_DEBUG, "Problem parsing DeploymentRepository", ioe);
+                throw ioe;
+            }
+            finally {
+                if (input != null) {
+                    try {
+                        input.close();
+                    }
+                    catch (IOException e) {
+                        m_log.log(LogService.LOG_DEBUG, "Error closing stream", e);
+                    }
+                }
+            }
+
+            m_log.log(LogService.LOG_DEBUG, "Cache added for " + targetId);
+
+            m_cachedVersionLists.put(targetId, stringVersionList);
+            return stringVersionList;
         }
-
-        m_log.log(LogService.LOG_DEBUG, "Cache added for " + targetId);
-
-        m_cachedVersionLists.put(targetId, stringVersionList);
-        return stringVersionList;
+        finally {
+            m_usageCounter.getAndDecrement();
+        }
     }
 
     /**
@@ -254,30 +291,31 @@ public class RepositoryBasedProvider implements DeploymentProvider, ManagedServi
      * @return A list of ArtifactData object representing this version.
      */
     private List<ArtifactData> getAllArtifactData(List<XmlDeploymentArtifact> deploymentArtifacts) throws IllegalArgumentException {
-        List<ArtifactData> result = new ArrayList<ArtifactData>();
+        List<ArtifactData> result = new ArrayList<>();
 
         // get the bundledata for each URL
         for (XmlDeploymentArtifact pair : deploymentArtifacts) {
+            long artifactSize = pair.getSize();
+            
             Map<String, String> directives = pair.getDirective();
-
             if (directives.get(DIRECTIVE_KEY_PROCESSORID) == null) {
                 // this is a bundle.
                 String symbolicName = directives.get(KEY_SYMBOLICNAME);
                 String bundleVersion = directives.get(KEY_VERSION);
                 if (symbolicName != null) {
                     // it is the right symbolic name
-                    if (symbolicName.trim().equals("")) {
+                    if ("".equals(symbolicName.trim())) {
                         m_log.log(LogService.LOG_WARNING, "Invalid bundle:" + pair.toString() + " the symbolic name is empty.");
                     }
                     else {
-                        result.add(new ArtifactDataImpl(pair.getUrl(), directives, symbolicName, bundleVersion, true));
+                        result.add(new ArtifactDataImpl(pair.getUrl(), directives, symbolicName, artifactSize, bundleVersion, true /* hasChanged */));
                     }
                 }
             }
             else {
                 // it is an artifact.
                 String filename = directives.get(DIRECTIVE_KEY_RESOURCE_ID);
-                result.add(new ArtifactDataImpl(filename, pair.getUrl(), directives, true));
+                result.add(new ArtifactDataImpl(pair.getUrl(), directives, filename, artifactSize, true /* hasChanged */));
             }
 
         }
@@ -415,8 +453,12 @@ public class RepositoryBasedProvider implements DeploymentProvider, ManagedServi
                 throw new IllegalArgumentException("There is no deployment information available.");
             }
         }
-
-        return new GZIPInputStream(result);
+        if (result == null) {
+        	return null;
+        }
+        else {
+        	return new GZIPInputStream(result);
+        }
     }
     
     private boolean isCacheUpToDate() {
@@ -430,12 +472,22 @@ public class RepositoryBasedProvider implements DeploymentProvider, ManagedServi
 		}
     }
 
-    public void updated(Dictionary settings) throws ConfigurationException {
+    public void updated(Dictionary<String, ?> settings) throws ConfigurationException {
         if (settings != null) {
             String url = getNotNull(settings, URL, "DeploymentRepository URL not configured.");
             String name = getNotNull(settings, NAME, "RepositoryName not configured.");
             String customer = getNotNull(settings, CUSTOMER, "RepositoryCustomer not configured.");
-
+            String maximumNumberOfUsers = (String) settings.get(MAXIMUM_NUMBER_OF_USERS);
+            
+            if (maximumNumberOfUsers != null) {
+                try {
+                    m_maximumNumberOfUsers = Integer.parseInt(maximumNumberOfUsers);
+                }
+                catch (NumberFormatException nfe) {
+                    throw new ConfigurationException(MAXIMUM_NUMBER_OF_USERS, maximumNumberOfUsers + " is not a valid value for the maximum number of concurrent users.");
+                }
+            }
+            
             // create the remote repository and set it.
             try {
                 BackupRepository backup = new FilebasedBackupRepository(File.createTempFile("currentrepository", null), File.createTempFile("backuprepository", null));
@@ -470,7 +522,7 @@ public class RepositoryBasedProvider implements DeploymentProvider, ManagedServi
     /**
      * Convenience method for getting settings from a configuration dictionary.
      */
-    private String getNotNull(Dictionary settings, String id, String errorMessage) throws ConfigurationException {
+    private String getNotNull(Dictionary<String, ?> settings, String id, String errorMessage) throws ConfigurationException {
         String result = (String) settings.get(id);
         if (result == null) {
             throw new ConfigurationException(id, errorMessage);

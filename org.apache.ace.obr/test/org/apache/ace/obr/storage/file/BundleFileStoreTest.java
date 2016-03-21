@@ -18,8 +18,6 @@
  */
 package org.apache.ace.obr.storage.file;
 
-import static org.apache.ace.test.utils.TestUtils.UNIT;
-
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -27,20 +25,21 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Arrays;
-import java.util.Properties;
+import java.util.Dictionary;
+import java.util.Hashtable;
 import java.util.Random;
 import java.util.jar.Attributes;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
+import java.util.zip.ZipEntry;
 
 import org.apache.ace.obr.metadata.MetadataGenerator;
-import org.apache.ace.obr.storage.file.BundleFileStore.ResourceMetaData;
-import org.apache.ace.obr.storage.file.constants.OBRFileStoreConstants;
+import org.apache.ace.obr.storage.OBRFileStoreConstants;
 import org.apache.ace.test.utils.FileUtils;
 import org.apache.ace.test.utils.TestUtils;
 import org.osgi.framework.Constants;
-import org.osgi.framework.Version;
 import org.osgi.service.cm.ConfigurationException;
+import org.osgi.service.log.LogService;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
@@ -65,9 +64,13 @@ public class BundleFileStoreTest {
         m_directory = FileUtils.createTempFile(null);
         m_directory.mkdir();
 
-        Properties props = new Properties();
+        Dictionary<String, Object> props = new Hashtable<>();
+
         props.put(OBRFileStoreConstants.FILE_LOCATION_KEY, m_directory.getAbsolutePath());
         m_bundleStore.updated(props);
+
+        // set a null object on for log
+        TestUtils.configureObject(m_bundleStore, LogService.class);
 
         // create a mock MetadataGenerator
         m_metadata = new MockMetadataGenerator();
@@ -77,7 +80,7 @@ public class BundleFileStoreTest {
         m_bundleSubstitute1 = createFileWithContent(m_directory.getAbsoluteFile(), "bundleSub1.jar", 1000);
         m_bundleSubstitute2 = createFileWithContent(m_directory.getAbsoluteFile(), "bundleSub2.jar", 2000);
         m_bundleSubstitute3 = createFileWithContent(m_directory.getAbsoluteFile(), "bundleSub3.jar", 3000);
-        m_bundleRepositoryFile = createFileWithContent(m_directory.getAbsoluteFile(), "repository.xml", 1000);
+        m_bundleRepositoryFile = createFileWithContent(m_directory.getAbsoluteFile(), "index.xml", 1000);
     }
 
     @AfterMethod(alwaysRun = true)
@@ -92,7 +95,7 @@ public class BundleFileStoreTest {
     /**
      * Test whether the metadata is generated when getting a bundle from the repository.
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void getBundle() throws Exception {
         m_bundleStore.get(m_bundleSubstitute1.getName());
         assert !m_metadata.generated() : "During getting a bundle, the metadata should not be regenerated.";
@@ -101,18 +104,18 @@ public class BundleFileStoreTest {
     /**
      * Test that the bundle store reutrns null for non-existing files.
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void getNonExistingBundle() throws Exception {
         assert m_bundleStore.get("blaat") == null : "Getting an non-existing file did not result in null?";
     }
 
     /**
-     * Test whether retrieving the repository.xml results in a call to the (mock) metadata generator, and the original
-     * file should correspond with the retrieved file.
+     * Test whether retrieving the index.xml results in a call to the (mock) metadata generator, and the original file
+     * should correspond with the retrieved file.
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void getRepositoryFile() throws Exception {
-        InputStream newInputStream = m_bundleStore.get("repository.xml");
+        InputStream newInputStream = m_bundleStore.get("index.xml");
         assert m_metadata.generated() : "During getting the repository file, the metadata should be regenerated.";
 
         byte[] orgContentBuffer = new byte[1000];
@@ -121,22 +124,23 @@ public class BundleFileStoreTest {
         FileInputStream orgInputStream = new FileInputStream(m_bundleRepositoryFile);
         byte[] newContentBuffer = new byte[1000];
         orgInputStream.read(newContentBuffer);
+        orgInputStream.close();
 
-        assert Arrays.equals(orgContentBuffer, newContentBuffer) : "The original repository.xml content should equal the newly retrieved content.";
+        assert Arrays.equals(orgContentBuffer, newContentBuffer) : "The original index.xml content should equal the newly retrieved content.";
     }
 
     /**
      * Test whether the BundleStore notices the set of bundles has changed (bundle updated), and makes a call to the
      * (mock) metadata generator.
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void updateBundle() throws Exception {
-        m_bundleStore.get("repository.xml");
+        m_bundleStore.get("index.xml");
         assert m_metadata.numberOfCalls() == 1 : "The MetadataGenerator should be called once";
 
         m_bundleSubstitute1Larger = createFileWithContent(m_directory.getAbsoluteFile(), "bundleSub1.jar", 2000);
 
-        m_bundleStore.get("repository.xml");
+        m_bundleStore.get("index.xml");
         assert m_metadata.numberOfCalls() == 2 : "The MetadataGenerator should be called twice";
 
         // test specific tear down
@@ -148,21 +152,21 @@ public class BundleFileStoreTest {
      * (mock) metadata generator. Also a call should be made when a bundle is replaced by another one (number of bundles
      * stay the same, but one bundle is replaced by another).
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void addBundle() throws Exception {
-        m_bundleStore.get("repository.xml");
+        m_bundleStore.get("index.xml");
         assert m_metadata.numberOfCalls() == 1 : "The MetadataGenerator should be called once";
 
         File bundleSubstituteX = createFileWithContent(m_directory.getAbsoluteFile(), "bundleSubX.jar", 2000);
 
-        m_bundleStore.get("repository.xml");
+        m_bundleStore.get("index.xml");
         assert m_metadata.numberOfCalls() == 2 : "The MetadataGenerator should be called twice";
 
         bundleSubstituteX.delete();
 
         File bundleSubstituteY = createFileWithContent(m_directory.getAbsoluteFile(), "bundleSubY.jar", 2000);
 
-        m_bundleStore.get("repository.xml");
+        m_bundleStore.get("index.xml");
         assert m_metadata.numberOfCalls() == 3 : "The MetadataGenerator should be called three times";
 
         // test specific tear down
@@ -173,7 +177,7 @@ public class BundleFileStoreTest {
      * Test whether the BundleStore notices the set of bundles has not changed, and thus will not make a call to the
      * (mock) metadata generator.
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void replaceWithSameBundle() throws Exception {
         m_bundleStore.get("bundleSub1.jar");
         assert m_metadata.numberOfCalls() == 0 : "The MetadataGenerator should not be called";
@@ -181,6 +185,7 @@ public class BundleFileStoreTest {
         FileInputStream inputStream = new FileInputStream(m_bundleSubstitute1);
         byte[] buffer = new byte[1000];
         inputStream.read(buffer);
+        inputStream.close();
         m_bundleSubstitute1.delete();
 
         File newFile = new File(m_directory, "bundleSub1.jar");
@@ -197,12 +202,13 @@ public class BundleFileStoreTest {
      * Test whether changing the directory where the bundles are stored, does not result in a call to the (mock)
      * metadata generator, as the metadata will only be regenerated after getting a file.
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void updateConfigurationWithValidConfiguration() throws Exception {
         File subDir = new File(m_directory.getAbsolutePath(), "changedDirectory");
         subDir.mkdir();
 
-        Properties props = new Properties();
+        Dictionary<String, Object> props = new Hashtable<>();
+
         props.put(OBRFileStoreConstants.FILE_LOCATION_KEY, subDir.getAbsolutePath());
         try {
             m_bundleStore.updated(props);
@@ -221,14 +227,15 @@ public class BundleFileStoreTest {
      * Test whether changing the directory where the bundles are stored to something that is not a directory, this
      * should fail.
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void updateConfigurationWithIsNotDirectory() throws Exception {
         boolean exceptionThrown = false;
 
         File file = new File(m_directory.getAbsolutePath(), "file");
         file.createNewFile();
 
-        Properties props = new Properties();
+        Dictionary<String, Object> props = new Hashtable<>();
+
         props.put(OBRFileStoreConstants.FILE_LOCATION_KEY, file.getAbsolutePath());
         try {
             m_bundleStore.updated(props);
@@ -243,96 +250,108 @@ public class BundleFileStoreTest {
         file.delete();
     }
 
-    @Test(groups = { UNIT })
+    @Test()
     public void putBundle() throws Exception {
         File bundle = createTmpResource("foo.bar", "1.0.0");
-        String filePath = m_bundleStore.put(new FileInputStream(bundle), null);
-        assert filePath.equals("foo/bar/foo.bar-1.0.0.jar");
+        String filePath = m_bundleStore.put(new FileInputStream(bundle), null, false);
+        assert filePath.equals("foo/foo.bar-1.0.0.jar") : "Path should be 'foo/foo.bar-1.0.0.jar', was " + filePath;
         File file = new File(m_directory, filePath);
         assert file.exists();
     }
 
-    @Test(groups = { UNIT })
-    public void putBundleDuplicate() throws Exception {
+    @Test()
+    public void putBundleSameDuplicate() throws Exception {
         File bundle = createTmpResource("foo.bar", "1.0.0");
-        m_bundleStore.put(new FileInputStream(bundle), null);
-        String filePath2 = m_bundleStore.put(new FileInputStream(bundle), null);
+        String filePath = m_bundleStore.put(new FileInputStream(bundle), null, false);
+        assert filePath != null;
+        String filePath2 = m_bundleStore.put(new FileInputStream(bundle), null, false);
+        assert filePath2 != null;
+        assert filePath2.equals(filePath);
+    }
+
+    @Test()
+    public void putBundleDifferentDuplicate() throws Exception {
+        File bundle = createTmpResource("foo.bar", "1.0.0", new byte[] { 1 });
+        File bundle2 = createTmpResource("foo.bar", "1.0.0", new byte[] { 2 });
+        String filePath = m_bundleStore.put(new FileInputStream(bundle), null, false);
+        assert filePath != null;
+        String filePath2 = m_bundleStore.put(new FileInputStream(bundle2), null, false);
         assert filePath2 == null;
     }
 
-    @Test(groups = { UNIT }, expectedExceptions = { IOException.class }, expectedExceptionsMessageRegExp = "Not a valid bundle and no filename found")
+    @Test(expectedExceptions = { IOException.class }, expectedExceptionsMessageRegExp = "Not a valid bundle and no filename found.*")
     public void putBundleFail() throws Exception {
         File bundle = createTmpResource(null, "1.0.0");
-        String filePath = m_bundleStore.put(new FileInputStream(bundle), null);
-        assert filePath.equals("foo/bar/foo.bar-1.0.0.jar");
+        String filePath = m_bundleStore.put(new FileInputStream(bundle), null, false);
+        assert filePath.equals("foo/bar/foo.bar-1.0.0.jar") : "Path should be 'foo/bar/foo.bar-1.0.0.jar', was " + filePath;
         File file = new File(m_directory, filePath);
         assert file.exists();
     }
 
-    @Test(groups = { UNIT })
+    @Test()
     public void putRemoveArtifact() throws Exception {
         File bundle = createTmpResource(null, null);
-        String filePath = m_bundleStore.put(new FileInputStream(bundle), "foo.bar-2.3.7.test1.xxx");
-        assert filePath.equals("foo/bar/foo.bar-2.3.7.test1.xxx");
+        String filePath = m_bundleStore.put(new FileInputStream(bundle), "foo.bar-2.3.7.test1.xxx", false);
+        assert filePath.equals("foo/foo.bar-2.3.7.test1.xxx");
         File file = new File(m_directory, filePath);
         assert file.exists();
     }
 
-    @Test(groups = { UNIT })
+    @Test()
     public void putArtifactDefaultVersion() throws Exception {
         File bundle = createTmpResource(null, null);
-        String filePath = m_bundleStore.put(new FileInputStream(bundle), "foo.bar.xxx");
-        assert filePath.equals("foo/bar/foo.bar-0.0.0.xxx");
+        String filePath = m_bundleStore.put(new FileInputStream(bundle), "foo.bar.xxx", false);
+        assert filePath.equals("foo/foo.bar.xxx");
         File file = new File(m_directory, filePath);
         assert file.exists();
     }
 
-    @Test(groups = { UNIT })
+    @Test()
     public void putArtifactMavenVersion() throws Exception {
         File bundle = createTmpResource(null, null);
-        String filePath = m_bundleStore.put(new FileInputStream(bundle), "foo.bar-2.3.7-test1.xxx");
-        assert filePath.equals("foo/bar/foo.bar-2.3.7-test1.xxx");
+        String filePath = m_bundleStore.put(new FileInputStream(bundle), "foo.bar-2.3.7-test1.xxx", false);
+        assert filePath.equals("foo/foo.bar-2.3.7-test1.xxx");
         File file = new File(m_directory, filePath);
         assert file.exists();
     }
 
-    @Test(groups = { UNIT }, expectedExceptions = { IOException.class }, expectedExceptionsMessageRegExp = "Not a valid bundle and no filename found")
+    @Test(expectedExceptions = { IOException.class }, expectedExceptionsMessageRegExp = "Not a valid bundle and no filename found.*")
     public void putArtifactFail1() throws Exception {
         File bundle = createTmpResource(null, null);
-        m_bundleStore.put(new FileInputStream(bundle), null);
+        m_bundleStore.put(new FileInputStream(bundle), null, false);
     }
 
-    @Test(groups = { UNIT }, expectedExceptions = { IOException.class }, expectedExceptionsMessageRegExp = "Not a valid bundle and no filename found")
+    @Test(expectedExceptions = { IOException.class }, expectedExceptionsMessageRegExp = "Not a valid bundle and no filename found.*")
     public void putArtifactFail2() throws Exception {
         File bundle = createTmpResource(null, null);
-        m_bundleStore.put(new FileInputStream(bundle), "");
+        m_bundleStore.put(new FileInputStream(bundle), "", false);
     }
 
-    @Test(groups = { UNIT })
+    @Test()
     public void removeBundle() throws Exception {
         File bundle = createTmpResource("foo.bar", "1.0.0");
-        String filePath = m_bundleStore.put(new FileInputStream(bundle), null);
+        String filePath = m_bundleStore.put(new FileInputStream(bundle), null, false);
         File file = new File(m_directory, filePath);
         assert file.exists();
         assert m_bundleStore.remove(filePath);
         assert !file.exists();
     }
 
-    @Test(groups = { UNIT })
+    @Test()
     public void removeBundleFaill() throws Exception {
         File file = new File(m_directory, "no/such/file");
         assert !file.exists();
         assert !m_bundleStore.remove("no/such/file");
     }
 
-    @Test(groups = { UNIT })
+    @Test()
     public void removeArtifact() throws Exception {
         File bundle = createTmpResource(null, null);
-        String filePath = m_bundleStore.put(new FileInputStream(bundle), "foo.bar-2.3.7.test1.xxx");
-        assert filePath.equals("foo/bar/foo.bar-2.3.7.test1.xxx");
+        String filePath = m_bundleStore.put(new FileInputStream(bundle), "foo.bar-2.3.7.test1.xxx", false);
+        assert filePath.equals("foo/foo.bar-2.3.7.test1.xxx");
         File file = new File(m_directory, filePath);
         assert file.exists();
-        assert m_bundleStore.remove("foo/bar/foo.bar-2.3.7.test1.xxx");
+        assert m_bundleStore.remove("foo/foo.bar-2.3.7.test1.xxx");
         assert !file.exists();
     }
 
@@ -340,11 +359,12 @@ public class BundleFileStoreTest {
      * Test whether not configuring the directory (so retrieving the directory returns null), results in a
      * ConfigurationException. Updating with null as dictionary should only clean up things, and nothing else.
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void updateConfigurationWithNull() throws Exception {
         boolean exceptionThrown = false;
 
-        Properties props = new Properties();
+        Dictionary<String, Object> props = new Hashtable<>();
+
         try {
             m_bundleStore.updated(props);
         }
@@ -369,10 +389,11 @@ public class BundleFileStoreTest {
      * Test whether not configuring the directory (so retrieving the directory returns null), results in a
      * ConfigurationException.
      */
-    @Test(groups = { UNIT })
+    @Test()
     public void updateConfigurationWithSameDirectory() throws Exception {
 
-        Properties props = new Properties();
+        Dictionary<String, Object> props = new Hashtable<>();
+
         props.put(OBRFileStoreConstants.FILE_LOCATION_KEY, m_directory.getAbsolutePath());
         try {
             m_bundleStore.updated(props);
@@ -382,24 +403,15 @@ public class BundleFileStoreTest {
         }
         assert !m_metadata.generated() : "After changing the directory, the metadata should not be regenerated.";
     }
-    
-    @Test(groups = { UNIT })
-    public void checkArtifactMetadataGeneration() {
-    	ResourceMetaData data = m_bundleStore.getArtifactMetaData("resource-1.0.3.xml");
-		assert "resource".equals(data.getSymbolicName()) : "Generated symbolic name should be 'resource', was " + data.getSymbolicName();
-		assert "1.0.3".equals(data.getVersion()) : "Generated version should be '1.0.3', was " + data.getVersion();
-		assert "xml".equals(data.getExtension()) : "Extension should be 'xml', was " + data.getExtension();
-
-		data = m_bundleStore.getArtifactMetaData("maven-artifact-2.3.5-SNAPSHOT.jar");
-		assert "maven-artifact".equals(data.getSymbolicName()) : "Generated symbolic name should be 'maven-artifact', was " + data.getSymbolicName();
-		assert "2.3.5-SNAPSHOT".equals(data.getVersion()) : "Generated version should be '2.3.5-SNAPSHOT', was " + data.getVersion();
-		assert "jar".equals(data.getExtension()) : "Extension should be 'jar', was " + data.getExtension();
-    }
 
     private File createTmpResource(String symbolicName, String version) throws IOException {
+        return createTmpResource(symbolicName, version, null);
+    }
+
+    private File createTmpResource(String symbolicName, String version, byte[] data) throws IOException {
         File tmpFile = File.createTempFile("tmpbundle-", "jar");
         tmpFile.deleteOnExit();
-        
+
         Manifest manifest = new Manifest();
         manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
         if (symbolicName != null) {
@@ -409,6 +421,10 @@ public class BundleFileStoreTest {
             manifest.getMainAttributes().putValue(Constants.BUNDLE_VERSION, version);
         }
         JarOutputStream target = new JarOutputStream(new FileOutputStream(tmpFile), manifest);
+        if (data != null) {
+            target.putNextEntry(new ZipEntry("data"));
+            target.write(data, 0, data.length);
+        }
         target.close();
         return tmpFile;
     }

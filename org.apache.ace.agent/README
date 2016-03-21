@@ -1,18 +1,25 @@
-ACE Management Agent 
 
-@see ACE-347
+Work in progress
 
-Notes:
 
-* Switched to factory SPI approach for pluggability/extensions.
-* Removed export package atributes / cleaned up bundle contents.
-* Assembled most target specific business logic code in project.
-* Supports configuration through single (multi-agent) configuration.
- 
- TODOs:
- 
- * Cleanup assembled code and parent projects
- * More config options
- * More (i)testing
- * Create run-agent project
- * Replace ace executor with a executorservice?
+On downloads:
+
+1) Download ared stored temp-files and as a result it is not possible to resume interrupted 
+downloads from a new handle. This should be changed to storage in the data dir using names 
+based in url so that they that can be discovered and resumed.
+
+2) Download result provides access to the download through a File. To be more clean this 
+should be an inputstream.
+
+
+On events:
+
+1) The EventsHandler/EventListener mechanism does not yet support a topic interest list like 
+eventadmin does. This should be added as it will help reduce event load if we start throwing 
+more.
+
+2) To reduce the overhead of configuration lookup we should consider adding config changed
+events that other components can register to.
+
+3) At this point the only events are those posted by the DeploymentAdmin. We should think
+about which agent events make sense and add them.

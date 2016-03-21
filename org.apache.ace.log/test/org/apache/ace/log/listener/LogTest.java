@@ -18,13 +18,12 @@
  */
 package org.apache.ace.log.listener;
 
-import static org.apache.ace.test.utils.TestUtils.UNIT;
-
 import java.util.Dictionary;
+import java.util.Hashtable;
 import java.util.List;
 import java.util.Properties;
 
-import org.apache.ace.log.AuditEvent;
+import org.apache.ace.feedback.AuditEvent;
 import org.apache.ace.log.Log;
 import org.apache.ace.log.listener.MockLog.LogEntry;
 import org.apache.ace.test.utils.TestUtils;
@@ -50,12 +49,11 @@ public class LogTest {
     /**
      * Test whether logging to the cache and setting a new Log causes the log entries to be flushed to this new Log.
      */
-    @SuppressWarnings("unchecked")
-    @Test(groups = { UNIT })
+    @Test()
     public void testLogCacheFlush() throws Exception {
         assert ((MockLog) m_mockLog).getLogEntries().size() == 0 : "MockLog is not empty on start of test";
 
-        Dictionary props = new Properties();
+        Dictionary<String, Object> props = new Hashtable<>();
         String test = "test";
         String value = "value";
         props.put(test, value);
@@ -73,13 +71,12 @@ public class LogTest {
      * Test whether after unsetting the Log, no new log entries are added, but that they are added to the cache instead
      * (test the latter by flushing the cache).
      */
-    @SuppressWarnings("unchecked")
-    @Test(groups = { UNIT })
+    @Test()
     public void testUnsettingLog() throws Exception {
         assert ((MockLog) m_mockLog).getLogEntries().size() == 0 : "MockLog is not empty on start of test";
         m_logProxy.setLog(m_mockLog);
 
-        Dictionary props = new Properties();
+        Dictionary<String, Object> props = new Hashtable<>();
         props.put("test", "value");
         m_logProxy.log(1, props);
 
@@ -87,7 +84,7 @@ public class LogTest {
 
         m_logProxy.setLog(null);
 
-        Dictionary props2 = new Properties();
+        Dictionary<String, Object> props2 = new Hashtable<>();
         props2.put("test2", "value2");
         m_logProxy.log(2, props2);
 
@@ -99,11 +96,11 @@ public class LogTest {
     }
 
     /**
-     * Basic functionality of the ListenerImpl is covered, the rest of the situations will probably be covered by integration
-     * tests. Note: test the deployment event INSTALL only when a BundleContext is available
+     * Basic functionality of the ListenerImpl is covered, the rest of the situations will probably be covered by
+     * integration tests. Note: test the deployment event INSTALL only when a BundleContext is available
      */
     @SuppressWarnings("unchecked")
-    @Test(groups = { UNIT })
+    @Test()
     public void testEventConverting() throws Exception {
         ListenerImpl listeners = new ListenerImpl(null, m_logProxy);
         listeners.startInternal();
@@ -145,12 +142,12 @@ public class LogTest {
         listeners.frameworkEvent(frameworkEvent);
         listeners.stopInternal();
 
-        List logEntries = ((MockLog) m_mockLog).getLogEntries();
+        List<LogEntry> logEntries = ((MockLog) m_mockLog).getLogEntries();
         assert logEntries.size() == 2 : "2 log entries should be logged";
 
         LogEntry bundleEntry = (LogEntry) logEntries.get(0);
         assert bundleEntry.getType() == AuditEvent.BUNDLE_INSTALLED : "state BUNDLE_INSTALLED (" + AuditEvent.BUNDLE_INSTALLED + ") should be in log but '" + bundleEntry.getType() + "' is in log instead";
-        Dictionary bundleProps = bundleEntry.getProperties();
+        Dictionary<String, ?> bundleProps = bundleEntry.getProperties();
         assert bundleProps.size() == 4 : "4 properties should be stored, but found: " + bundleProps.size();
         assert bundleProps.get(AuditEvent.KEY_ID).equals(Long.toString(bundleId)) : "id should be " + bundleId + " but is: " + bundleProps.get(AuditEvent.KEY_ID);
         assert bundleProps.get(AuditEvent.KEY_NAME).equals(symbolicName) : "symbolicName should be " + symbolicName + " but is " + bundleProps.get(AuditEvent.KEY_NAME);
@@ -159,7 +156,7 @@ public class LogTest {
 
         LogEntry frameworkEntry = (LogEntry) logEntries.get(1);
         assert frameworkEntry.getType() == AuditEvent.FRAMEWORK_INFO : "state FRAMEWORK_INFO (" + AuditEvent.FRAMEWORK_INFO + ") should be in log but '" + frameworkEntry.getType() + "' is in log instead";
-        Dictionary frameworkProps = frameworkEntry.getProperties();
+        Dictionary<String, ?> frameworkProps = frameworkEntry.getProperties();
         assert frameworkProps.size() == 2 : "2 properties should be stored, but found: " + frameworkProps.size();
         assert frameworkProps.get(AuditEvent.KEY_ID).equals(Long.toString(bundleId)) : "id should be " + bundleId + " but is: " + frameworkProps.get(AuditEvent.KEY_ID);
         assert frameworkProps.get(AuditEvent.KEY_TYPE).equals(IllegalStateException.class.getName()) : "exceptionType should be " + IllegalStateException.class.getName() + " but is: " + frameworkProps.get(AuditEvent.KEY_TYPE);

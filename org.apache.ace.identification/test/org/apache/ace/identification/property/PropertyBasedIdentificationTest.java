@@ -18,52 +18,46 @@
  */
 package org.apache.ace.identification.property;
 
-import org.testng.Assert;
-import org.testng.annotations.Test;
-import static org.apache.ace.test.utils.TestUtils.UNIT;
-import static org.hamcrest.core.Is.is;
-import static org.hamcrest.core.IsEqual.equalTo;
-import static org.hamcrest.core.IsNull.nullValue;
 import static org.mockito.Mockito.mock;
 
 import java.lang.reflect.Field;
 import java.util.Dictionary;
 import java.util.Hashtable;
 
-import org.apache.ace.identification.property.constants.IdentificationConstants;
-import org.mockito.Mockito;
+import org.apache.ace.identification.IdentificationConstants;
 import org.osgi.service.cm.ConfigurationException;
 import org.osgi.service.log.LogService;
+import org.testng.Assert;
 import org.testng.annotations.Test;
 
 public class PropertyBasedIdentificationTest {
-    @Test(groups = { UNIT })
+    @Test()
     public void getIdWithoutUpdate() {
         PropertyBasedIdentification basedIdentification = new PropertyBasedIdentification();
         Assert.assertNull(basedIdentification.getID());
     }
 
-    @Test(groups = { UNIT })
+    @Test()
     public void getIdWithUpdate() throws ConfigurationException {
         PropertyBasedIdentification basedIdentification = new PropertyBasedIdentification();
-        Dictionary dict = new Hashtable();
-        dict.put( IdentificationConstants.IDENTIFICATION_TARGETID_KEY, "myTargetId" );
-        basedIdentification.updated( dict );
+        Dictionary<String, Object> dict = new Hashtable<>();
+        dict.put(IdentificationConstants.IDENTIFICATION_TARGETID_KEY, "myTargetId");
+        basedIdentification.updated(dict);
         Assert.assertEquals(basedIdentification.getID(), "myTargetId");
     }
 
-    @Test(groups = { UNIT })
+    @Test()
     public void getIdOverwrite() throws ConfigurationException {
         PropertyBasedIdentification basedIdentification = new PropertyBasedIdentification();
-        injectServices( basedIdentification );
+        injectServices(basedIdentification);
 
-        Dictionary dict = new Hashtable();
-        dict.put( IdentificationConstants.IDENTIFICATION_TARGETID_KEY, "oldId" );
-        Dictionary dict2 = new Hashtable();
-        dict2.put( IdentificationConstants.IDENTIFICATION_TARGETID_KEY, "newId" );
+        Dictionary<String, Object> dict = new Hashtable<>();
+        dict.put(IdentificationConstants.IDENTIFICATION_TARGETID_KEY, "oldId");
+        Dictionary<String, Object> dict2 = new Hashtable<>();
+        dict2.put(IdentificationConstants.IDENTIFICATION_TARGETID_KEY, "newId");
 
-        basedIdentification.updated( dict );
-        basedIdentification.updated( dict2 );
+        basedIdentification.updated(dict);
+        basedIdentification.updated(dict2);
 
         Assert.assertEquals(basedIdentification.getID(), "newId");
     }

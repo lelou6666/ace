@@ -26,7 +26,7 @@ import java.util.Map;
 import java.util.Properties;
 
 import org.apache.ace.discovery.Discovery;
-import org.apache.ace.discovery.property.constants.DiscoveryConstants;
+import org.apache.ace.discovery.DiscoveryConstants;
 import org.apache.felix.dm.Component;
 import org.apache.felix.dm.DependencyActivatorBase;
 import org.apache.felix.dm.DependencyManager;
@@ -38,14 +38,14 @@ import org.osgi.service.log.LogService;
 
 public class Activator extends DependencyActivatorBase implements ManagedServiceFactory {
     private static final String MA_NAME = "ma";
+    
+    private final Map<String, Component> m_instances = new HashMap<>();
     private DependencyManager m_manager;
-    private BundleContext m_context;
-    private final Map /*<String, Component>*/ m_instances = new HashMap();
-    private volatile LogService m_log;
 
     public void init(BundleContext context, DependencyManager manager) throws Exception {
-        Dictionary properties = new Hashtable();
+        Dictionary<Object, Object> properties = new Hashtable<>();
         properties.put(Constants.SERVICE_PID, DiscoveryConstants.DISCOVERY_PID);
+        
         manager.add(createComponent()
             .setInterface(new String[] {Discovery.class.getName()}, properties)
             .setImplementation(PropertyBasedDiscovery.class)
@@ -71,7 +71,7 @@ public class Activator extends DependencyActivatorBase implements ManagedService
         return "Discovery Service Factory";
     }
 
-    public void updated(String pid, Dictionary dict) throws ConfigurationException {
+    public void updated(String pid, Dictionary<String, ?> dict) throws ConfigurationException {
         String ma = (String) dict.get(MA_NAME);
         String id = (String) dict.get(DiscoveryConstants.DISCOVERY_URL_KEY);
         
@@ -104,7 +104,7 @@ public class Activator extends DependencyActivatorBase implements ManagedService
             m_manager.add(component);
         }
         else {
-            Object service = component.getService();
+            Object service = component.getInstance();
             if (service instanceof PropertyBasedDiscovery) {
                 PropertyBasedDiscovery identification = (PropertyBasedDiscovery) service;
                 try {

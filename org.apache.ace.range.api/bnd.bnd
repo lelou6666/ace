@@ -1,5 +1,15 @@
+<<<<<<< HEAD
 -buildpath: ${^-buildpath}, org.apache.ace.test;version=latest
+=======
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
+-buildpath: \
+	${^-buildpath},\
+	${testng},\
+	org.apache.ace.test;version=latest
+
+>>>>>>> refs/remotes/apache/trunk
 Export-Package: org.apache.ace.range
-Bundle-Version: 1.0.0
+Bundle-Version: 1.1.2
 Bundle-Name: Apache ACE Range API
 Bundle-Description: Provides the Apache ACE Range API packages

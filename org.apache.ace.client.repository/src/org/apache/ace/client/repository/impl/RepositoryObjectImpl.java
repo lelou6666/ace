@@ -1,3 +1,21 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
 package org.apache.ace.client.repository.impl;
 
 import java.util.ArrayList;
@@ -12,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import org.apache.ace.client.repository.Associatable;
 import org.apache.ace.client.repository.Association;
@@ -25,17 +44,21 @@ import com.thoughtworks.xstream.io.HierarchicalStreamWriter;
 
 /**
  * Represents a value-object as is part of the repository.<br>
- * It stores the 'member' values of the repository object, and allows putting tags on this object by using <code>put()</code>
- * and <code>remove()</code>. It 'looks' like a dictionary to allow filtering of it, using an ldap filter.
+ * It stores the 'member' values of the repository object, and allows putting tags on this object by using
+ * <code>put()</code> and <code>remove()</code>. It 'looks' like a dictionary to allow filtering of it, using an ldap
+ * filter.
  */
+@SuppressWarnings("rawtypes")
 public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary<String, Object> implements RepositoryObject, EventHandler {
-    private final Map<String, String> m_attributes = new HashMap<String, String>();
-    private final Map<String, String> m_tags = new HashMap<String, String>();
-    @SuppressWarnings("unchecked")
-    private final Map<Class, List<Association>> m_associations = new HashMap<Class, List<Association>>();
+    private final Map<String, String> m_attributes = new HashMap<>();
+    private final Map<String, String> m_tags = new HashMap<>();
+    /** see ACE-463 */
+    private final Set<String> m_mergedAttrTags = new HashSet<>();
+    private final Map<Class<?>, List<Association>> m_associations = new HashMap<>();
     private final ChangeNotifier m_notifier;
     private final String m_xmlNode;
-    
+    private static final Pattern VALID_KEY_PATTERN = Pattern.compile("[a-zA-Z]([a-zA-Z0-9_:.-])*");
+
     private volatile boolean m_deleted = false;
     private volatile boolean m_busy = false;
 
@@ -56,14 +79,21 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
         m_xmlNode = xmlNode;
         if (attributes != null) {
             m_attributes.putAll(attributes);
+            m_mergedAttrTags.addAll(attributes.keySet());
         }
         if (tags != null) {
             m_tags.putAll(tags);
+            m_mergedAttrTags.addAll(tags.keySet());
         }
         if (notifier == null) {
             throw new IllegalArgumentException();
         }
         m_notifier = notifier;
+    }
+
+    @Override
+    public void notifyChanged() {
+        notifyChanged(null);
     }
 
     protected void notifyChanged(Properties props) {
@@ -85,8 +115,8 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
     }
 
     /**
-     * Gets the object associated with this key. Will return null when the key is not used; if the key is available for both the
-     * tags and the object's basic information, an array of two Strings will be returned.
+     * Gets the object associated with this key. Will return null when the key is not used; if the key is available for
+     * both the tags and the object's basic information, an array of two Strings will be returned.
      */
     @Override
     public Object get(Object key) {
@@ -112,7 +142,7 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
     @Override
     public boolean isEmpty() {
         synchronized (m_attributes) {
-            return m_attributes.isEmpty() && m_tags.isEmpty();
+            return m_mergedAttrTags.isEmpty();
         }
     }
 
@@ -122,17 +152,15 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
     @Override
     public Enumeration<String> keys() {
         synchronized (m_attributes) {
-            Set<String> keys = new HashSet<String>();
-            keys.addAll(m_attributes.keySet());
-            keys.addAll(m_tags.keySet());
-            return new KeysEnumeration(keys.iterator());
+            return new KeysEnumeration(m_mergedAttrTags.iterator());
         }
     }
 
     /**
      * Unsupported operation.
      * 
-     * @throws UnsupportedOperationException always
+     * @throws UnsupportedOperationException
+     *             always
      */
     @Override
     public Object put(String key, Object value) {
@@ -142,7 +170,8 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
     /**
      * Unsupported operation.
      * 
-     * @throws UnsupportedOperationException always
+     * @throws UnsupportedOperationException
+     *             always
      */
     @Override
     public Object remove(Object key) {
@@ -155,32 +184,98 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
     @Override
     public int size() {
         synchronized (m_attributes) {
-            Set<String> keys = new HashSet<String>();
-            keys.addAll(m_attributes.keySet());
-            keys.addAll(m_tags.keySet());
-            return keys.size();
+            return m_mergedAttrTags.size();
         }
     }
 
     public String addAttribute(String key, String value) {
+        if (value == null || key == null) {
+            throw new IllegalArgumentException("Invalid key/value pair: " + key + "/" + value);
+        }
+        validateKey(key);
         for (String s : getDefiningKeys()) {
             if (s.equals(key)) {
                 throw new UnsupportedOperationException("The defining attribute " + key + " is not allowed to be changed.");
             }
         }
+        String result = null;
         synchronized (m_attributes) {
             ensureCurrent();
-            notifyChanged(null);
-            return m_attributes.put(key, value);
+            result = m_attributes.get(key);
+            // ACE-463: keep a cached version of the merged attribute/tag keys...
+            m_mergedAttrTags.add(key);
+            if (!value.equals(result)) {
+                result = m_attributes.put(key, value);
+                notifyChanged(null);
+            }
         }
+        return result;
+    }
+
+    @Override
+    public String removeAttribute(String key) {
+        for (String s : getDefiningKeys()) {
+            if (s.equals(key)) {
+                throw new UnsupportedOperationException("The defining attribute " + key + " is not allowed to be changed.");
+            }
+        }
+        String result = null;
+        synchronized (m_attributes) {
+            ensureCurrent();
+            result = m_attributes.get(key);
+            // ACE-463: keep a cached version of the merged attribute/tag keys...
+            if (!m_tags.containsKey(key)) {
+                m_mergedAttrTags.remove(key);
+            }
+            if (result != null) {
+                result = m_attributes.remove(key);
+                notifyChanged(null);
+            }
+        }
+        return result;
     }
 
     public String addTag(String key, String value) {
+        if (value == null || key == null) {
+            throw new IllegalArgumentException("Invalid key/value pair: " + key + "/" + value);
+        }
+        validateKey(key);
+        String result = null;
         synchronized (m_attributes) {
             ensureCurrent();
-            notifyChanged(null);
-            return m_tags.put(key, value);
+            result = m_tags.get(key);
+            // ACE-463: keep a cached version of the merged attribute/tag keys...
+            m_mergedAttrTags.add(key);
+            if (!value.equals(result)) {
+                result = m_tags.put(key, value);
+                notifyChanged(null);
+            }
         }
+        return result;
+    }
+
+    private void validateKey(String key) {
+        if (!VALID_KEY_PATTERN.matcher(key).matches()) {
+            throw new IllegalArgumentException("Invalid key " + key + " does not match regex pattern " + VALID_KEY_PATTERN.pattern());
+        }
+    }
+
+    @Override
+    public String removeTag(String key) {
+        String result = null;
+        synchronized (m_attributes) {
+            ensureCurrent();
+            result = m_tags.get(key);
+            // ACE-463: keep a cached version of the merged attribute/tag keys...
+            if (!m_attributes.containsKey(key)) {
+                m_mergedAttrTags.remove(key);
+            }
+            if (result != null) {
+                result = m_tags.remove(key);
+                notifyChanged(null);
+            }
+        }
+        return result;
     }
 
     public String getAttribute(String key) {
@@ -197,7 +292,7 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
 
     public Enumeration<String> getAttributeKeys() {
         synchronized (m_attributes) {
-            return new KeysEnumeration(new HashSet<String>(m_attributes.keySet()).iterator());
+            return new KeysEnumeration(new HashSet<>(m_attributes.keySet()).iterator());
         }
     }
 
@@ -207,23 +302,21 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
 
     public Enumeration<String> getTagKeys() {
         synchronized (m_attributes) {
-            return new KeysEnumeration(new HashSet<String>(m_tags.keySet()).iterator());
+            return new KeysEnumeration(new HashSet<>(m_tags.keySet()).iterator());
         }
     }
 
-    @SuppressWarnings("unchecked")
     public void add(Association association, Class clazz) {
         synchronized (m_associations) {
             List<Association> associations = m_associations.get(clazz);
             if (associations == null) {
-                associations = new ArrayList<Association>();
+                associations = new ArrayList<>();
                 m_associations.put(clazz, associations);
             }
             associations.add(association);
         }
     }
 
-    @SuppressWarnings("unchecked")
     public void remove(Association association, Class clazz) {
         synchronized (m_associations) {
             List<Association> associations = m_associations.get(clazz);
@@ -233,10 +326,9 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
         }
     }
 
-    @SuppressWarnings("unchecked")
     public <A extends Associatable> List<A> getAssociations(Class<A> clazz) {
         synchronized (m_associations) {
-            List<A> result = new ArrayList<A>();
+            List<A> result = new ArrayList<>();
             List<Association> associations = m_associations.get(clazz);
             if (associations != null) {
                 for (Association association : associations) {
@@ -252,7 +344,6 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
         }
     }
 
-    @SuppressWarnings("unchecked")
     public boolean isAssociated(Object obj, Class clazz) {
         synchronized (m_associations) {
             if (obj == null) {
@@ -272,7 +363,7 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
 
     @SuppressWarnings("unchecked")
     public <TA extends Associatable, A extends Association> List<A> getAssociationsWith(Associatable other, Class<TA> clazz, Class<A> associationType) {
-        List<A> result = new ArrayList<A>();
+        List<A> result = new ArrayList<>();
         synchronized (m_associations) {
             if (other == null) {
                 return result;
@@ -290,9 +381,8 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public boolean equals(Object o) {
-        synchronized(m_attributes) {
+        synchronized (m_attributes) {
             if ((o == null) || !(getClass().isInstance(o))) {
                 return false;
             }
@@ -320,13 +410,12 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
     }
 
     /**
-     * Returns an array of keys which are considered to be defining for this object's
-     * attributes. The basic implementation just uses every key that is used; this
-     * function is intended to be overridden by deriving classes, providing a real
-     * set.
+     * Returns an array of keys which are considered to be defining for this object's attributes. The basic
+     * implementation just uses every key that is used; this function is intended to be overridden by deriving classes,
+     * providing a real set.
      *
-     * Note that the array returned from this function should be read from only;
-     * writing to it will change the state of the object.
+     * Note that the array returned from this function should be read from only; writing to it will change the state of
+     * the object.
      */
     String[] getDefiningKeys() {
         return m_attributes.keySet().toArray(new String[m_attributes.size()]);
@@ -334,7 +423,7 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
 
     @Override
     public int hashCode() {
-        synchronized(m_attributes) {
+        synchronized (m_attributes) {
             return m_attributes.hashCode();
         }
     }
@@ -350,20 +439,24 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
     }
 
     /**
-     * This method is intended to be overridden by deriving classes, to read custom information
-     * from the XML representation of this object. This method should end with the writer at
-     * the same 'level' as before, that is, using equally many moveDown() and moveUp() calls.
-     * @param reader A reader to read from the XML stream.
+     * This method is intended to be overridden by deriving classes, to read custom information from the XML
+     * representation of this object. This method should end with the writer at the same 'level' as before, that is,
+     * using equally many moveDown() and moveUp() calls.
+     * 
+     * @param reader
+     *            A reader to read from the XML stream.
      */
     protected void readCustom(HierarchicalStreamReader reader) {
         // do nothing
     }
 
     /**
-     * This method is intended to be overridden by deriving classes, to write custom information
-     * to the XML representation of this object. This method should end with the writer at
-     * the same 'level' as before, that is, using equally many moveDown() and moveUp() calls.
-     * @param writer A writer to write to the XML stream.
+     * This method is intended to be overridden by deriving classes, to write custom information to the XML
+     * representation of this object. This method should end with the writer at the same 'level' as before, that is,
+     * using equally many moveDown() and moveUp() calls.
+     * 
+     * @param writer
+     *            A writer to write to the XML stream.
      */
     protected void writeCustom(HierarchicalStreamWriter writer) {
         // do nothing
@@ -384,7 +477,7 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
 
     static Map<String, String> readMap(HierarchicalStreamReader reader) {
         reader.moveDown();
-        Map<String, String> result = new HashMap<String, String>();
+        Map<String, String> result = new HashMap<>();
         while (reader.hasMoreChildren()) {
             reader.moveDown();
             result.put(reader.getNodeName(), reader.getValue());
@@ -395,12 +488,14 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
     }
 
     /**
-     * Helper function to check the existence of keys in a map. Each attribute is required
-     * to be non-empty.
-     * @param attributes A map of attribute-value combinations.
-     * @param mandatory An array of attributes which have to be present in the map.
+     * Helper function to check the existence of keys in a map. Each attribute is required to be non-empty.
+     * 
+     * @param attributes
+     *            A map of attribute-value combinations.
+     * @param mandatory
+     *            An array of attributes which have to be present in the map.
      * @return <code>attributes</code> if this map meets the requirements. If not, <code>IllegalArgumentException</code>
-     * will be thrown.
+     *         will be thrown.
      */
     static Map<String, String> checkAttributes(Map<String, String> attributes, String... mandatory) {
         boolean[] booleans = new boolean[mandatory.length];
@@ -410,13 +505,16 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
 
     /**
      * Helper function to check the existence of keys in a map.
-     * @param attributes A map of attribute-value combinations.
-     * @param mandatory An array of attributes which have to be present in the map.
-     * @param emptyAttributeAllowed An array of booleans, indicating which of the attributes is allowed
-     * to be equal. Items in this array are matched by index on the elements in <code>mandatory</code>, so
-     * the length should be equal.
+     * 
+     * @param attributes
+     *            A map of attribute-value combinations.
+     * @param mandatory
+     *            An array of attributes which have to be present in the map.
+     * @param emptyAttributeAllowed
+     *            An array of booleans, indicating which of the attributes is allowed to be equal. Items in this array
+     *            are matched by index on the elements in <code>mandatory</code>, so the length should be equal.
      * @return <code>attributes</code> if this map meets the requirements. If not, <code>IllegalArgumentException</code>
-     * will be thrown.
+     *         will be thrown.
      */
     static Map<String, String> checkAttributes(Map<String, String> attributes, String[] mandatory, boolean[] emptyAttributeAllowed) {
         if (!(mandatory.length == emptyAttributeAllowed.length)) {
@@ -460,8 +558,8 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
         // setBusy should 'wait' until all altering operations have passed. To do so,
         // it gets the locks for the other 'set' objects. Once it has all these locks,
         // we are sure no thread is performing a set-action.
-        synchronized(m_associations) {
-            synchronized(m_attributes) {
+        synchronized (m_associations) {
+            synchronized (m_attributes) {
                 if (m_busy && !busy) {
                     m_associations.notifyAll();
                     m_attributes.notifyAll();
@@ -492,7 +590,7 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
     }
 
     void ensureCurrent() {
-    	ensureNotDeleted();
+        ensureNotDeleted();
         ensureNotBusy();
     }
 
@@ -505,9 +603,9 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
             String value = getAttribute(key);
             if (value != null) {
                 result.append("-")
-                .append(key.replaceAll("\\\\", "\\\\\\\\").replaceAll("-", "\\-").replaceAll("\\/", "&#47"))
-                .append("-")
-                .append(value.replaceAll("\\\\", "\\\\\\\\").replaceAll("-", "\\-").replaceAll("\\/", "&#47"));
+                    .append(key.replaceAll("\\\\", "\\\\\\\\").replaceAll("-", "\\-").replaceAll("\\/", "&#47"))
+                    .append("-")
+                    .append(value.replaceAll("\\\\", "\\\\\\\\").replaceAll("-", "\\-").replaceAll("\\/", "&#47"));
                 // About the &#47: the forward slash will be used by the preference admin, but we don't want that.
             }
         }
@@ -516,9 +614,11 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
     }
 
     /**
-     * Creates a filter string for use in associations, optionally with some
-     * additional properties. The basic implementation will use all <code>getDefiningKeys</code>.
-     * @param properties Properties indicating specifics of the filter to be created.
+     * Creates a filter string for use in associations, optionally with some additional properties. The basic
+     * implementation will use all <code>getDefiningKeys</code>.
+     * 
+     * @param properties
+     *            Properties indicating specifics of the filter to be created.
      * @return A string representation of a filter, for use in <code>Association</code>s.
      */
     public String getAssociationFilter(Map<String, String> properties) {
@@ -534,9 +634,10 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
     }
 
     /**
-     * Determines the cardinality of this endpoint of an association, given
-     * the passed properties.
-     * @param properties Properties indicating specifics of this endpoint.
+     * Determines the cardinality of this endpoint of an association, given the passed properties.
+     * 
+     * @param properties
+     *            Properties indicating specifics of this endpoint.
      * @return The necessary cardinality.
      */
     public int getCardinality(Map<String, String> properties) {
@@ -544,8 +645,8 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
     }
 
     /**
-     * Returns a <code>Comparator</code> for this type of object, suitable
-     * for the endpoint properties that are passed.
+     * Returns a <code>Comparator</code> for this type of object, suitable for the endpoint properties that are passed.
+     * 
      * @return A <code>Comparator</code> for this type of object
      */
     public Comparator<T> getComparator() {
@@ -584,5 +685,19 @@ public class RepositoryObjectImpl<T extends RepositoryObject> extends Dictionary
         public Object nextElement() {
             return get(m_iter.nextElement());
         }
+    }
+
+    @Override
+    public String toString() {
+        StringBuilder attrs = new StringBuilder();
+        Enumeration<String> enumeration = getAttributeKeys();
+        while (enumeration.hasMoreElements()) {
+            String key = enumeration.nextElement();
+            if (attrs.length() > 0) {
+                attrs.append(',');
+            }
+            attrs.append(key + "=" + getAttribute(key));
+        }
+        return getClass().getSimpleName() + "[" + attrs.toString() + "]";
     }
 }

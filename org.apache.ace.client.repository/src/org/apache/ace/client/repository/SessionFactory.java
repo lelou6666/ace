@@ -18,6 +18,11 @@
  */
 package org.apache.ace.client.repository;
 
+<<<<<<< HEAD
+=======
+import java.util.Map;
+
+>>>>>>> refs/remotes/apache/trunk
 import aQute.bnd.annotation.ProviderType;
 
 /**
@@ -28,16 +33,25 @@ import aQute.bnd.annotation.ProviderType;
  * same property is part of the actual event so it can be used in event filters.
  */
 @ProviderType
+<<<<<<< HEAD
 public interface SessionFactory
 {
+=======
+public interface SessionFactory {
+>>>>>>> refs/remotes/apache/trunk
     /** Session ID for session specific service or event. */
     public static final String SERVICE_SID = "service.sid";
+    
     /**
-     * Create a new session based on the supplied session ID.
+     * Create a new session based on the supplied session ID and configuration. Supplying a
+     * session configuration is optional. It can contain parameters to specifically configure
+     * the session.
      *
      * @param sessionID the session ID
+     * @param sessionConfiguration the session configuration, if any
      */
-    public void createSession(String sessionID);
+    public void createSession(String sessionID, Map sessionConfiguration);
+
     /**
      * Destroy an existing session supplied on the supplied session ID.
      *

@@ -24,7 +24,7 @@ import java.util.Map;
 import java.util.Properties;
 
 import org.apache.ace.identification.Identification;
-import org.apache.ace.identification.property.constants.IdentificationConstants;
+import org.apache.ace.identification.IdentificationConstants;
 import org.apache.felix.dm.Component;
 import org.apache.felix.dm.DependencyActivatorBase;
 import org.apache.felix.dm.DependencyManager;
@@ -37,13 +37,10 @@ import org.osgi.service.log.LogService;
 public class Activator extends DependencyActivatorBase implements ManagedServiceFactory {
     private static final String MA_NAME = "ma";
     private DependencyManager m_manager;
-    private BundleContext m_context;
-    private final Map /*<String, Component>*/ m_instances = new HashMap();
-    private volatile LogService m_log;
+    private final Map<String, Component> m_instances = new HashMap<>();
     
     public synchronized void init(BundleContext context, DependencyManager manager) throws Exception {
         m_manager = manager;
-        m_context = context;
         manager.add(createComponent()
             .setInterface(new String[] {Identification.class.getName()}, null)
             .setImplementation(PropertyBasedIdentification.class)
@@ -70,7 +67,7 @@ public class Activator extends DependencyActivatorBase implements ManagedService
         return "Identification Service Factory";
     }
 
-    public void updated(String pid, Dictionary dict) throws ConfigurationException {
+    public void updated(String pid, Dictionary<String, ?> dict) throws ConfigurationException {
         String ma = (String) dict.get(MA_NAME);
         String id = (String) dict.get(IdentificationConstants.IDENTIFICATION_TARGETID_KEY);
 
@@ -99,7 +96,7 @@ public class Activator extends DependencyActivatorBase implements ManagedService
             m_manager.add(component);
         }
         else {
-            Object service = component.getService();
+            Object service = component.getInstance();
             if (service instanceof PropertyBasedIdentification) {
                 PropertyBasedIdentification identification = (PropertyBasedIdentification) service;
                 identification.setID(id);

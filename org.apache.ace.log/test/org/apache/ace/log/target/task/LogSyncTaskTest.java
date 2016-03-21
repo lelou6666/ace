@@ -18,8 +18,6 @@
  */
 package org.apache.ace.log.target.task;
 
-import static org.apache.ace.test.utils.TestUtils.UNIT;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -28,14 +26,12 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.Dictionary;
 import java.util.List;
-import java.util.Properties;
 
 import org.apache.ace.discovery.Discovery;
+import org.apache.ace.feedback.Descriptor;
+import org.apache.ace.feedback.Event;
 import org.apache.ace.identification.Identification;
-import org.apache.ace.log.LogDescriptor;
-import org.apache.ace.log.LogEvent;
 import org.apache.ace.log.target.store.LogStore;
-import org.apache.ace.log.target.task.LogSyncTask;
 import org.apache.ace.range.SortedRangeSet;
 import org.apache.ace.test.utils.TestUtils;
 import org.osgi.service.log.LogService;
@@ -60,42 +56,46 @@ public class LogSyncTaskTest {
         TestUtils.configureObject(m_task, LogStore.class);
     }
 
-    @Test(groups = { UNIT })
+    @Test()
     public synchronized void getRange() throws Exception {
-        final LogDescriptor range = new LogDescriptor(TARGET_ID, 1, new SortedRangeSet("1-10"));
+        final Descriptor range = new Descriptor(TARGET_ID, 1, new SortedRangeSet("1-10"));
         m_task.getDescriptor(new InputStream() {
             int m_count = 0;
             byte[] m_bytes = (range.toRepresentation() + "\n").getBytes();
+
             @Override
             public int read() throws IOException {
                 if (m_count < m_bytes.length) {
                     byte b = m_bytes[m_count];
                     m_count++;
                     return b;
-                } else {
+                }
+                else {
                     return -1;
                 }
             }
         });
     }
 
-    @Test(groups = { UNIT })
+    @Test()
     public synchronized void synchronizeLog() throws Exception {
-        final LogDescriptor range = new LogDescriptor(TARGET_ID, 1, new SortedRangeSet(new long[] {0}));
-        final LogEvent event = new LogEvent(TARGET_ID, 1, 1, 1, 1, new Properties());
-        final List<LogEvent> events = new ArrayList<LogEvent>();
+        final Descriptor range = new Descriptor(TARGET_ID, 1, new SortedRangeSet(new long[] { 0 }));
+        final Event event = new Event(TARGET_ID, 1, 1, 1, 1);
+        final List<Event> events = new ArrayList<>();
         events.add(event);
 
         InputStream input = new InputStream() {
             byte[] bytes = range.toRepresentation().getBytes();
             int count = 0;
+
             @Override
             public int read() throws IOException {
                 if (count < bytes.length) {
                     byte b = bytes[count];
                     count++;
                     return b;
-                } else {
+                }
+                else {
                     return -1;
                 }
             }
@@ -104,16 +104,25 @@ public class LogSyncTaskTest {
             public List<?> get(long logID, long from, long to) throws IOException {
                 return events;
             }
+
             public long getHighestID(long logID) throws IOException {
                 return event.getID();
             }
-            public List<?> get(long logID) throws IOException { return null; }
-            public long[] getLogIDs() throws IOException { return null; }
-            @SuppressWarnings("unchecked")
-            public LogEvent put(int type, Dictionary props) throws IOException { return null; }
+
+            public List<?> get(long logID) throws IOException {
+                return null;
+            }
+
+            public long[] getLogIDs() throws IOException {
+                return null;
+            }
+
+            public Event put(int type, Dictionary props) throws IOException {
+                return null;
+            }
         });
         MockConnection connection = new MockConnection(new URL("http://mock"));
-        
+
         m_task.synchronizeLog(1, input, connection);
         String expectedString = event.toRepresentation() + "\n";
         String actualString = connection.getString();
@@ -156,8 +165,9 @@ public class LogSyncTaskTest {
     }
 
     private class MockOutputStream extends OutputStream {
-        byte[] bytes = new byte[8*1024];
+        byte[] bytes = new byte[8 * 1024];
         int count = 0;
+
         @Override
         public void write(int arg0) throws IOException {
             bytes[count] = (byte) arg0;

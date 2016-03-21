@@ -25,9 +25,8 @@ import org.apache.ace.client.repository.helper.PropertyResolver;
 import org.apache.ace.client.repository.object.TargetObject;
 
 /**
- * Top-level property resolver, also able to return collections
- * of distributions, features and artifacts linked to this target
- * repository object.
+ * Top-level property resolver, also able to return collections of distributions, features and artifacts linked to this
+ * target repository object.
  */
 public class TargetPropertyResolver extends RepositoryPropertyResolver {
 
@@ -35,10 +34,11 @@ public class TargetPropertyResolver extends RepositoryPropertyResolver {
         super(to);
     }
 
+    @SuppressWarnings("unchecked")
     public Collection<PropertyResolver> getDistributions() {
-        List<PropertyResolver> list = new ArrayList<PropertyResolver>();
+        List<PropertyResolver> list = new ArrayList<>();
 
-        List<RepositoryObject> distributions = (List<RepositoryObject>)getChildren();
+        List<RepositoryObject> distributions = (List<RepositoryObject>) getChildren();
 
         for (RepositoryObject repo : distributions) {
             list.add(new RepositoryPropertyResolver(repo));
@@ -48,9 +48,9 @@ public class TargetPropertyResolver extends RepositoryPropertyResolver {
     }
 
     public Collection<PropertyResolver> getFeatures() {
-        List<PropertyResolver> list = new ArrayList<PropertyResolver>();
+        List<PropertyResolver> list = new ArrayList<>();
 
-        Set<RepositoryObject> features = new HashSet<RepositoryObject>();
+        Set<RepositoryObject> features = new HashSet<>();
 
         for (RepositoryObject repositoryObject : getChildren()) {
             features.addAll(getChildren(repositoryObject));
@@ -63,10 +63,10 @@ public class TargetPropertyResolver extends RepositoryPropertyResolver {
     }
 
     public Collection<PropertyResolver> getArtifacts() {
-        List<PropertyResolver> list = new ArrayList<PropertyResolver>();
+        List<PropertyResolver> list = new ArrayList<>();
 
-        Set<RepositoryObject> artifacts = new HashSet<RepositoryObject>();
-        Set<RepositoryObject> features = new HashSet<RepositoryObject>();
+        Set<RepositoryObject> artifacts = new HashSet<>();
+        Set<RepositoryObject> features = new HashSet<>();
 
         for (RepositoryObject repositoryObject : getChildren()) {
             features.addAll(getChildren(repositoryObject));

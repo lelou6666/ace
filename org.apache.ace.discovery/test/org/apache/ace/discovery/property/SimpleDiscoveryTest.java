@@ -18,13 +18,11 @@
  */
 package org.apache.ace.discovery.property;
 
-import static org.apache.ace.test.utils.TestUtils.UNIT;
-
 import java.net.URL;
 import java.util.Dictionary;
 import java.util.Hashtable;
 
-import org.apache.ace.discovery.property.constants.DiscoveryConstants;
+import org.apache.ace.discovery.DiscoveryConstants;
 import org.apache.ace.test.constants.TestConstants;
 import org.osgi.service.cm.ConfigurationException;
 import org.testng.annotations.BeforeTest;
@@ -45,11 +43,12 @@ public class SimpleDiscoveryTest {
 
     /**
      * Test if setting a valid configuration is handled correctly
+     * 
      * @throws Exception
      */
-    @Test(groups = { UNIT })
+    @Test
     public void simpleDiscoveryValidConfiguration() throws ConfigurationException {
-        Dictionary<String, String> properties = new Hashtable<String, String>();
+        Dictionary<String, String> properties = new Hashtable<>();
         properties.put(SERVERURL_KEY, VALID_URL);
         m_discovery.updated(properties);
         URL url = m_discovery.discover();
@@ -58,23 +57,25 @@ public class SimpleDiscoveryTest {
 
     /**
      * Test if setting an invalid configuration is handled correctly.
+     * 
      * @throws ConfigurationException
      */
-    @Test(groups = {UNIT}, expectedExceptions = ConfigurationException.class)
+    @Test(expectedExceptions = ConfigurationException.class)
     public void simpleDiscoveryInvalidConfiguration() throws ConfigurationException {
-        Dictionary<String, String> properties = new Hashtable<String, String>();
+        Dictionary<String, String> properties = new Hashtable<>();
         properties.put(SERVERURL_KEY, INVALID_URL);
         m_discovery.updated(properties);
     }
 
     /**
      * Test if supplying an empty configuration results in the service's default being used.
+     * 
      * @throws ConfigurationException
      */
-    @Test(groups = {UNIT})
+    @Test
     public void simpleDiscoveryEmptyConfiguration() throws ConfigurationException {
         // set valid config
-        Dictionary<String, String> properties = new Hashtable<String, String>();
+        Dictionary<String, String> properties = new Hashtable<>();
         properties.put(SERVERURL_KEY, VALID_URL);
         m_discovery.updated(properties);
         // set empty config

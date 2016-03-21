@@ -28,14 +28,14 @@ import java.net.ConnectException;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLConnection;
-import java.util.Iterator;
 import java.util.List;
 
+import org.amdatu.scheduling.Job;
 import org.apache.ace.connectionfactory.ConnectionFactory;
 import org.apache.ace.discovery.Discovery;
+import org.apache.ace.feedback.Descriptor;
+import org.apache.ace.feedback.Event;
 import org.apache.ace.identification.Identification;
-import org.apache.ace.log.LogDescriptor;
-import org.apache.ace.log.LogEvent;
 import org.apache.ace.log.target.store.LogStore;
 import org.apache.ace.range.RangeIterator;
 import org.apache.ace.range.SortedRangeSet;
@@ -43,7 +43,7 @@ import org.osgi.service.log.LogService;
 
 // TODO there are two versions of this class around, the other ohne being the server.LogSyncTask,
 // and both are fairly similar
-public class LogSyncTask implements Runnable {
+public class LogSyncTask implements Job {
 
     private static final String COMMAND_QUERY = "query";
     private static final String COMMAND_SEND = "send";
@@ -66,7 +66,8 @@ public class LogSyncTask implements Runnable {
     /**
      * Synchronize the log events available remote with the events available locally.
      */
-    public void run() {
+    @Override
+    public void execute() {
         URL host = m_discovery.discover();
 
         if (host == null) {
@@ -149,17 +150,15 @@ public class LogSyncTask implements Runnable {
             long lowest = rangeIterator.next();
             long highest = delta.getHigh();
             if (lowest <= highest) {
-                List events = m_LogStore.get(logID, lowest, highestLocal > highest ? highest : highestLocal);
-                Iterator iter = events.iterator();
-                while (iter.hasNext()) {
-                    LogEvent current = (LogEvent) iter.next();
+                List<Event> events = m_LogStore.get(logID, lowest, highestLocal > highest ? highest : highestLocal);
+                for (Event current : events) {
                     while ((current.getID() > lowest) && rangeIterator.hasNext()) {
                         lowest = rangeIterator.next();
                     }
                     if (current.getID() == lowest) {
                         // before we send the LogEvent to the other side, we fill out the
                         // appropriate identification
-                        LogEvent event = new LogEvent(m_identification.getID(), current);
+                        Event event = new Event(m_identification.getID(), current);
                         writer.write(event.toRepresentation() + "\n");
                     }
                 }
@@ -178,14 +177,14 @@ public class LogSyncTask implements Runnable {
      * @throws java.io.IOException
      *             If no range could be determined due to an I/O failure.
      */
-    protected LogDescriptor getDescriptor(InputStream queryInput) throws IOException {
+    protected Descriptor getDescriptor(InputStream queryInput) throws IOException {
         BufferedReader queryReader = null;
         try {
             queryReader = new BufferedReader(new InputStreamReader(queryInput));
             String rangeString = queryReader.readLine();
             if (rangeString != null) {
                 try {
-                    return new LogDescriptor(rangeString);
+                    return new Descriptor(rangeString);
                 }
                 catch (IllegalArgumentException iae) {
                     throw new IOException("Could not determine highest remote event id, received malformed event range (" + rangeString + ")");

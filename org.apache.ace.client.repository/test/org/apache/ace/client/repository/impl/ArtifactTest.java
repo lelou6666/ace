@@ -38,8 +38,8 @@ import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
 /**
- * Tests the behavior of the ArtifactObject class, most prominently, checking whether
- * delegation to the Helpers is done at the right moments.
+ * Tests the behavior of the ArtifactObject class, most prominently, checking whether delegation to the Helpers is done
+ * at the right moments.
  */
 public class ArtifactTest {
 
@@ -54,17 +54,17 @@ public class ArtifactTest {
             }
         });
 
-        m_artifactRepository = new ArtifactRepositoryImpl(TestUtils.createNullObject(ChangeNotifier.class));
+        m_artifactRepository = new ArtifactRepositoryImpl(TestUtils.createNullObject(ChangeNotifier.class), new RepositoryConfigurationImpl());
         TestUtils.configureObject(m_artifactRepository, LogService.class);
         TestUtils.configureObject(m_artifactRepository, BundleContext.class, bc);
     }
 
-    @Test( groups = { TestUtils.UNIT } )
+    @Test()
     public void testAttributeChecking() {
         ArtifactHelper helper = new MockHelper("yourURL");
 
         try {
-            createArtifact("myMime", "myUrl", null, null);
+            createArtifact("myMime", "myUrl", null, null, null);
             assert false : "There is no helper for this type of artifact.";
         }
         catch (IllegalArgumentException iae) {
@@ -73,9 +73,10 @@ public class ArtifactTest {
 
         m_artifactRepository.addHelper("myMime", helper);
 
-        ArtifactObject obj = createArtifact("myMime", "myUrl", null, null);
+        ArtifactObject obj = createArtifact("myMime", "myUrl", null, null, "10");
 
         assert obj.getURL().equals("yourURL");
+        assert obj.getSize() == 10;
 
         try {
             m_artifactRepository.getHelper("yourMime");
@@ -86,17 +87,17 @@ public class ArtifactTest {
         }
     }
 
-    @Test( groups = { TestUtils.UNIT } )
+    @Test()
     public void testResourceProcessorFiltering() throws InvalidSyntaxException {
         m_artifactRepository.addHelper("myMime", new MockHelper());
         m_artifactRepository.addHelper(BundleHelper.MIMETYPE, new BundleHelperImpl());
 
-        createArtifact(BundleHelper.MIMETYPE, "normalBundle", "normalBundle", null);
+        createArtifact(BundleHelper.MIMETYPE, "normalBundle", "normalBundle", null, "10");
 
-        ArtifactObject resourceProcessor1 = createArtifact(BundleHelper.MIMETYPE, "resourceProcessor1", "resourceProcessor1", "somePID");
-        ArtifactObject resourceProcessor2 = createArtifact(BundleHelper.MIMETYPE, "resourceProcessor2", "resourceProcessor2", "someOtherPID");
+        ArtifactObject resourceProcessor1 = createArtifact(BundleHelper.MIMETYPE, "resourceProcessor1", "resourceProcessor1", "somePID", "11");
+        ArtifactObject resourceProcessor2 = createArtifact(BundleHelper.MIMETYPE, "resourceProcessor2", "resourceProcessor2", "someOtherPID", "12");
 
-        ArtifactObject myArtifact = createArtifact("myMime", "myArtifact", null, null);
+        ArtifactObject myArtifact = createArtifact("myMime", "myArtifact", null, null, "13");
 
         assert m_artifactRepository.get().size() == 2 : "We expect to find two artifacts, but we find " + m_artifactRepository.get().size();
 
@@ -106,15 +107,31 @@ public class ArtifactTest {
         list = m_artifactRepository.getResourceProcessors();
         assert (list.size() == 2) && list.contains(resourceProcessor1) && list.contains(resourceProcessor2) : "We expect to find both our resource processors when asking for them; we find " + list.size() + " artifacts.";
 
-       m_artifactRepository.get(m_artifactRepository.createFilter("(" + BundleHelper.MIMETYPE + "=my\\(Mi\\*me)"));
+        list = m_artifactRepository.get(m_artifactRepository.createFilter("(mimetype=myMime)"));
+        assert (list.size() == 1) && list.contains(myArtifact) : "Expected a single artifact with the specified mimetype!";
+
+        list = m_artifactRepository.get(m_artifactRepository.createFilter("(mimetype=my\\(Mi\\*me)"));
+        assert (list.size() == 0) : "Expected no artifact to match the requested filter!";
     }
 
-    private ArtifactObject createArtifact(String mimetype, String URL, String symbolicName, String processorPID) {
-        Map<String, String> attributes = new HashMap<String, String>();
+    @Test()
+    public void testArtifactSizeDeterminedByRepository() throws InvalidSyntaxException {
+        m_artifactRepository.addHelper(BundleHelper.MIMETYPE, new BundleHelperImpl());
+        ArtifactObject artifact = createArtifact(BundleHelper.MIMETYPE, "normalBundle", "normalBundle", null, "10");
+
+        List<ArtifactObject> list = m_artifactRepository.get();
+        assert (list.size() == 1) && list.contains(artifact) : "Expected a single artifact with the specified mimetype!";
+
+        assert list.get(0).getSize() == 10 : "Expected the size to be filled in!";
+    }
+
+    private ArtifactObject createArtifact(String mimetype, String URL, String symbolicName, String processorPID, String size) {
+        Map<String, String> attributes = new HashMap<>();
         attributes.put(ArtifactObject.KEY_MIMETYPE, mimetype);
         attributes.put(ArtifactObject.KEY_URL, URL);
-        Map<String, String> tags = new HashMap<String, String>();
-
+        if (size != null) {
+            attributes.put(ArtifactObject.KEY_SIZE, size);
+        }
         if (symbolicName != null) {
             attributes.put(BundleHelper.KEY_SYMBOLICNAME, symbolicName);
         }
@@ -122,13 +139,14 @@ public class ArtifactTest {
             attributes.put(BundleHelper.KEY_RESOURCE_PROCESSOR_PID, processorPID);
         }
 
+        Map<String, String> tags = new HashMap<>();
         return m_artifactRepository.create(attributes, tags);
     }
 }
 
 /**
- * Helper for testing the ArtifactObject. In the constructor, a <code>replaceURL</code> can
- * be passed in to test the attribute normalization.
+ * Helper for testing the ArtifactObject. In the constructor, a <code>replaceURL</code> can be passed in to test the
+ * attribute normalization.
  */
 class MockHelper implements ArtifactHelper {
     private final String m_replaceURL;
@@ -153,11 +171,11 @@ class MockHelper implements ArtifactHelper {
     }
 
     public String[] getDefiningKeys() {
-        return new String[]{ArtifactObject.KEY_URL};
+        return new String[] { ArtifactObject.KEY_URL };
     }
 
     public String[] getMandatoryAttributes() {
-        return new String[]{ArtifactObject.KEY_URL};
+        return new String[] { ArtifactObject.KEY_URL };
     }
 
     public boolean canUse(ArtifactObject object) {

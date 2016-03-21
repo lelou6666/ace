@@ -18,44 +18,67 @@
  */
 package org.apache.ace.webui.vaadin;
 
+import static org.osgi.service.http.whiteboard.HttpWhiteboardConstants.HTTP_WHITEBOARD_CONTEXT_NAME;
+import static org.osgi.service.http.whiteboard.HttpWhiteboardConstants.HTTP_WHITEBOARD_CONTEXT_PATH;
+import static org.osgi.service.http.whiteboard.HttpWhiteboardConstants.HTTP_WHITEBOARD_CONTEXT_SELECT;
+import static org.osgi.service.http.whiteboard.HttpWhiteboardConstants.HTTP_WHITEBOARD_RESOURCE_PATTERN;
+import static org.osgi.service.http.whiteboard.HttpWhiteboardConstants.HTTP_WHITEBOARD_RESOURCE_PREFIX;
+import static org.osgi.service.http.whiteboard.HttpWhiteboardConstants.HTTP_WHITEBOARD_SERVLET_PATTERN;
+
 import java.util.Map;
 import java.util.Properties;
 
 import javax.servlet.Servlet;
 
 import org.apache.ace.client.repository.stateful.StatefulTargetObject;
-import org.apache.ace.webui.NamedObject;
 import org.apache.ace.webui.UIExtensionFactory;
 import org.apache.felix.dm.DependencyActivatorBase;
 import org.apache.felix.dm.DependencyManager;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.Constants;
-import org.osgi.service.http.HttpService;
+import org.osgi.service.http.context.ServletContextHelper;
+import org.osgi.service.log.LogService;
 
-import com.vaadin.ui.Button;
 import com.vaadin.ui.Component;
 import com.vaadin.ui.Label;
 import com.vaadin.ui.VerticalLayout;
 
 public class Activator extends DependencyActivatorBase {
+    private static final String PID = "org.apache.ace.webui.vaadin";
+
+    private static final String ACE_WEBUI_WHITEBOARD_CONTEXT_NAME = "org.apache.ace.webui";
+    private static final String ACE_WEBUI_WHITEBOARD_CONTEXT_SELECT_FILTER = "(" + HTTP_WHITEBOARD_CONTEXT_NAME + "=" + ACE_WEBUI_WHITEBOARD_CONTEXT_NAME + ")";
+
     @Override
     public void init(BundleContext context, DependencyManager manager) throws Exception {
+        Properties contextProps = new Properties();
+        contextProps.put(HTTP_WHITEBOARD_CONTEXT_NAME, ACE_WEBUI_WHITEBOARD_CONTEXT_NAME);
+        contextProps.put(HTTP_WHITEBOARD_CONTEXT_PATH, "/");
         manager.add(createComponent()
-            .setImplementation(VaadinResourceHandler.class)
-            .add(createServiceDependency()
-                .setService(HttpService.class)
-                .setRequired(true)
-            )
-            );
-        // register the main application for the ACE UI client
+            .setInterface(ServletContextHelper.class.getName(), contextProps)
+            .setImplementation(AceWebuiServletContextHelper.class)
+            .add(createConfigurationDependency().setPid(PID))
+            .add(createServiceDependency().setService(LogService.class).setRequired(false)));
+
+        Properties resourceRegistrationProps = new Properties();
+        resourceRegistrationProps.put(HTTP_WHITEBOARD_RESOURCE_PREFIX, "/VAADIN");
+        resourceRegistrationProps.put(HTTP_WHITEBOARD_RESOURCE_PATTERN, "/VAADIN/*");
+        resourceRegistrationProps.put(HTTP_WHITEBOARD_CONTEXT_SELECT, ACE_WEBUI_WHITEBOARD_CONTEXT_SELECT_FILTER);
         manager.add(createComponent()
-            .setInterface(Servlet.class.getName(), null)
-            .setImplementation(VaadinServlet.class)
-            .add(createConfigurationDependency()
-                .setPid(VaadinServlet.PID).setPropagate(true))
-            );
+            .setInterface(Object.class.getName(), resourceRegistrationProps)
+            .setImplementation(new Object()));
 
         Properties props = new Properties();
+        props.put(HTTP_WHITEBOARD_SERVLET_PATTERN, VaadinServlet.DEFAULT_SERVLET_ENDPOINT.concat("/*"));
+        props.put(HTTP_WHITEBOARD_CONTEXT_SELECT, ACE_WEBUI_WHITEBOARD_CONTEXT_SELECT_FILTER);
+
+        // register the main application for the ACE UI client
+        manager.add(createComponent()
+            .setInterface(Servlet.class.getName(), props)
+            .setImplementation(VaadinServlet.class)
+            .add(createConfigurationDependency().setPid(PID)));
+
+        props = new Properties();
         props.put(UIExtensionFactory.EXTENSION_POINT_KEY, UIExtensionFactory.EXTENSION_POINT_VALUE_TARGET);
         props.put(Constants.SERVICE_RANKING, Integer.valueOf(100));
 
@@ -66,12 +89,11 @@ public class Activator extends DependencyActivatorBase {
                 public Component create(Map<String, Object> context) {
                     VerticalLayout vl = new VerticalLayout();
                     vl.setCaption("Info");
-                    final NamedObject namedObject = (NamedObject) context.get("object");
-                    final StatefulTargetObject target = (StatefulTargetObject) namedObject.getObject();
-                    Label info = new Label(
-                        "Target ID          : " + namedObject.getName() + "\n" +
+                    final StatefulTargetObject target = (StatefulTargetObject) context.get("statefulTarget");
+                    Label info = new Label("Target ID          : " + target.getID() + "\n" +
                         "Installed version  : " + (target.getLastInstallVersion() == null ? "(none)" : target.getLastInstallVersion()) + "\n" +
                         "Available version  : " + target.getCurrentVersion() + "\n" +
+                        "Approval state     : " + target.getApprovalState() + "\n" +
                         "Store state        : " + target.getStoreState() + "\n" +
                         "Provisioning state : " + target.getProvisioningState() + "\n" +
                         "Registration state : " + target.getRegistrationState());
@@ -79,11 +101,6 @@ public class Activator extends DependencyActivatorBase {
                     vl.addComponent(info);
                     return vl;
                 }
-            })
-        );
-    }
-
-    @Override
-    public void destroy(BundleContext context, DependencyManager manager) throws Exception {
+            }));
     }
 }

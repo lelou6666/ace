@@ -18,7 +18,6 @@
  */
 package org.apache.ace.repository.ext.impl;
 
-import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -32,19 +31,20 @@ import org.apache.ace.repository.ext.BackupRepository;
 import aQute.bnd.annotation.ConsumerType;
 
 /**
- * A file-based implementation of the Backup Repository, using two files to store the current
- * and backup version.
+ * A file-based implementation of the Backup Repository, using two files to store the current and backup version.
  */
 @ConsumerType
 public class FilebasedBackupRepository implements BackupRepository {
+
     private static final int COPY_BUFFER_SIZE = 4096;
 
     private final File m_current;
     private final File m_backup;
 
     /**
-     * Creates a FilebasedBackupRepository. The file objects should point to a correct file,
-     * but the files will be created when necessary.
+     * Creates a FilebasedBackupRepository. The file objects should point to a correct file, but the files will be
+     * created when necessary.
+     * 
      * @param current A file to store the current revision in.
      * @param backup A file to store a backup version in.
      */
@@ -55,9 +55,8 @@ public class FilebasedBackupRepository implements BackupRepository {
 
     public InputStream read() throws IOException {
         if (!m_current.exists()) {
-            return new ByteArrayInputStream(new byte[0]);
+            return null;
         }
-
         try {
             return new FileInputStream(m_current);
         }
@@ -111,15 +110,17 @@ public class FilebasedBackupRepository implements BackupRepository {
             deletedBackup = m_backup.delete();
         }
         if (!(deletedCurrent && deletedBackup)) {
-            throw new IOException("Could not delete: " + (deletedCurrent ? "" : "current ") + (deletedBackup ? "" : "backup"));
+            throw new IOException("Could not delete: " + (deletedCurrent ? "" : "current " + m_current.getAbsolutePath()) +
+                (deletedBackup ? "" : "backup " + m_backup.getAbsolutePath()));
         }
     }
 
     /**
      * Helper function that writes the contents of one file to another.
+     * 
      * @param source The source file.
      * @param destination The destination file.
-     * @throws java.io.IOException Thrown when file IO goes wrong.
+     * @throws IOException Thrown when file IO goes wrong.
      */
     private static void copy(File source, File destination) throws IOException {
         if (destination.exists()) {
@@ -145,9 +146,10 @@ public class FilebasedBackupRepository implements BackupRepository {
 
     /**
      * Copies the contents of an input stream to an output stream.
+     * 
      * @param in The input stream.
      * @param out The output stream.
-     * @throws java.io.IOException Thrown when the output stream is closed unexpectedly.
+     * @throws IOException Thrown when the output stream is closed unexpectedly.
      */
     private static void copy(InputStream in, OutputStream out) throws IOException {
         byte[] buffer = new byte[COPY_BUFFER_SIZE];

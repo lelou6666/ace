@@ -1,13 +1,24 @@
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
 -sub: *.bnd
+<<<<<<< HEAD
 -buildpath: ${^-buildpath}, osgi.core,\
+=======
+-buildpath: \
+	${^-buildpath},\
+	${testng},\
+	osgi.core;version=6.0.0,\
+>>>>>>> refs/remotes/apache/trunk
 	osgi.cmpn,\
 	org.apache.felix.dependencymanager,\
-	javax.servlet,\
+	org.apache.felix.http.api,\
+	org.apache.felix.http.servlet-api,\
 	org.apache.ace.authentication.api;version=latest,\
 	org.apache.ace.test;version=latest,\
 	org.apache.ace.deployment.provider.api;version=latest,\
 	org.apache.ace.deployment.provider.base;version=latest,\
-	kxml2;version=2.3.0,\
-	org.apache.ace.deployment.util.test;version=latest
+	org.apache.ace.deployment.util.test;version=latest,\
+	org.apache.ace.http.api;version=latest,\
+	org.osgi.impl.bundle.repoindex.lib;packages="org.osgi.service.indexer,org.osgi.service.indexer.impl"
 	
 	

@@ -1,15 +1,25 @@
+<<<<<<< HEAD
 -buildpath: ${^-buildpath}, osgi.core,\
+=======
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
+-buildpath: \
+	${^-buildpath},\
+	${testng},\
+	osgi.core;version=6.0.0,\
+>>>>>>> refs/remotes/apache/trunk
 	osgi.cmpn,\
-	javax.servlet,\
+	org.apache.felix.http.api,\
+	org.apache.felix.http.servlet-api,\
 	org.apache.felix.dependencymanager,\
+	org.amdatu.scheduling.api,\
 	org.apache.ace.range.api;version=latest,\
 	org.apache.ace.test;version=latest,\
 	org.apache.ace.identification.api;version=latest,\
 	org.apache.ace.discovery.api;version=latest,\
-	org.apache.ace.scheduler.api;version=latest,\
 	org.apache.ace.connectionfactory;version=latest,\
 	org.apache.ace.authentication.api;version=latest,\
-	org.amdatu.mongo,\
-	com.mongodb
+	org.apache.ace.feedback.common;version=latest,\
+	org.apache.ace.http.api;version=latest
 
 -sub: *.bnd

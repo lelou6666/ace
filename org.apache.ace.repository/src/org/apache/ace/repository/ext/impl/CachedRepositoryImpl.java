@@ -18,7 +18,6 @@
  */
 package org.apache.ace.repository.ext.impl;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 
@@ -61,14 +60,12 @@ public class CachedRepositoryImpl implements CachedRepository {
 
     public InputStream checkout(boolean fail) throws IOException, IllegalArgumentException {
         m_mostRecentVersion = highestRemoteVersion();
-        if (m_mostRecentVersion == 0) {
+        if (m_mostRecentVersion <= 0) {
             // If there is no remote version, then simply return an empty stream.
             if (fail) {
                 throw new IOException("No version has yet been checked in to the repository.");
             }
-            else {
-                return new ByteArrayInputStream(new byte[0]);
-            }
+            return null;
         }
         return checkout(m_mostRecentVersion);
     }
@@ -92,7 +89,12 @@ public class CachedRepositoryImpl implements CachedRepository {
         if (m_mostRecentVersion < 0) {
             throw new IllegalStateException("A commit should be preceded by a checkout.");
         }
-        return commit(m_mostRecentVersion++);
+        boolean result = commit(m_mostRecentVersion);
+        if (result) {
+            // ACE-421: only bump in case of successful commit! 
+            m_mostRecentVersion++;
+        }
+        return result;
     }
 
     public boolean commit(long fromVersion) throws IOException, IllegalArgumentException {
@@ -111,8 +113,8 @@ public class CachedRepositoryImpl implements CachedRepository {
     public InputStream getLocal(boolean fail) throws IllegalArgumentException, IOException {
         // ACE-240: only fail in case there is no local version available; when mostRecentVersion 
         // equals to 0, it means that nothing has been committed locally...
-        if ((m_mostRecentVersion <= 0) && fail) {
-            throw new IOException("No local version available of " + m_local + ", remote " + m_remote);
+        if (m_mostRecentVersion <= 0 && fail) {
+    		throw new IOException("No local version available of " + m_local + ", remote " + m_remote);
         }
         return m_local.read();
     }

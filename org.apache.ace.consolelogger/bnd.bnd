@@ -1,9 +1,17 @@
+<<<<<<< HEAD
 -buildpath: ${^-buildpath}, \
 	osgi.core,\
+=======
+# Licensed to the Apache Software Foundation (ASF) under the terms of ASLv2 (http://www.apache.org/licenses/LICENSE-2.0).
+
+-buildpath: \
+	${^-buildpath},\
+	osgi.core;version=6.0.0,\
+>>>>>>> refs/remotes/apache/trunk
 	osgi.cmpn,\
 	org.apache.felix.dependencymanager
 Private-Package: org.apache.ace.consolelogger
 Bundle-Activator: org.apache.ace.consolelogger.Activator
-Bundle-Version: 1.0.0
+Bundle-Version: 1.0.3
 Bundle-Name: Apache ACE ConsoleLogger
 Bundle-Description: Registers a component that writes log message to the console

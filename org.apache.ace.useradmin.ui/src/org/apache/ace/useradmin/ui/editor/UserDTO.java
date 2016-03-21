@@ -28,24 +28,21 @@ import aQute.bnd.annotation.ProviderType;
  */
 @ProviderType
 public class UserDTO implements Comparable<UserDTO> {
-
-    private User m_user;
     private String m_previousUsername;
     private String m_username;
     private String m_password;
+    private String m_previousGroupname;
     private String m_groupname;
-    private Group m_group;
     private boolean m_usernameChanged;
     private boolean m_passwordChanged;
     private boolean m_groupChanged;
 
     public UserDTO(User user, Group group) {
-        m_user = user;
-        m_group = group;
         m_username = (String) user.getProperties().get("username");
         m_previousUsername = m_username;
         m_password = (String) user.getCredentials().get("password");
-        m_groupname = group.getName();
+        m_groupname = group != null? group.getName(): null;
+        m_previousGroupname = m_groupname;
     }
 
     public UserDTO(String username, String password, String groupname) {
@@ -53,6 +50,7 @@ public class UserDTO implements Comparable<UserDTO> {
         m_password = password;
         m_previousUsername = username;
         m_groupname = groupname;
+        m_previousGroupname = groupname;
     }
 
     /**
@@ -110,21 +108,19 @@ public class UserDTO implements Comparable<UserDTO> {
     }
 
     /**
+     * @return the previousGroupname
+     */
+    public String getPreviousGroupname() {
+        return m_previousGroupname;
+    }
+    
+    /**
      * Returns the current username that is stored in the useradminService.
      * 
      * @return username
      */
     public String getPreviousUsername() {
         return m_previousUsername;
-    }
-
-    /**
-     * Returns the user object.
-     * 
-     * @return user
-     */
-    public User getUser() {
-        return m_user;
     }
 
     /**
@@ -144,6 +140,7 @@ public class UserDTO implements Comparable<UserDTO> {
      */
     public void setUsername(String username) {
         m_usernameChanged = true;
+        m_previousUsername = m_username;
         m_username = username;
     }
 
@@ -182,16 +179,8 @@ public class UserDTO implements Comparable<UserDTO> {
      */
     public void setGroupname(String groupname) {
         m_groupChanged = true;
+        m_previousGroupname = m_groupname;
         m_groupname = groupname;
-    }
-
-    /**
-     * Returns the Group object
-     * 
-     * @return Group object
-     */
-    public Group getGroup() {
-        return m_group;
     }
 
     public String toString() {
